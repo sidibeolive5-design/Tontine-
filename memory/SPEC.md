@@ -98,6 +98,35 @@ cotisations en retard, pénalités (jours de retard × pénalité de la tontine)
 date du plus ancien impayé et progression. L'onglet affiche aussi 4 totaux :
 membres en retard, total dû, dont pénalités, jours impayés.
 
+## Règle des pénalités (corrigée)
+Une pénalité **forfaitaire** de `penalty_per_day` (500 FCFA par défaut) s'applique **une seule fois
+par jour impayé**, et seulement **à partir du lendemain** de l'échéance :
+- échéance du 10 septembre → 0 FCFA le 10 (statut « À payer aujourd'hui »), 500 FCFA dès le 11 ;
+- 5 jours impayés à 3 150 FCFA → 15 750 FCFA de cotisations + 2 500 FCFA de pénalités
+  (référence spec §35). La pénalité **ne se cumule pas** jour après jour sur une même échéance.
+
+Implémentation : `lib/core.py::penalty_amount(due, today, penalty_per_day)` — source unique
+utilisée par `/api/due-dates`, `/api/summary`, `/api/arrears`, la soumission de paiement,
+les statistiques de gérance et les deux crons. `late_days()` reste le nombre de jours écoulés
+depuis l'échéance (affichage uniquement).
+
+## Relance manuelle d'un membre en retard
+`POST /api/arrears/remind` (permission `send_notifications`, cloisonné par gérance) : message
+personnalisé optionnel + récapitulatif calculé côté serveur (jours impayés et total dû, pénalités
+incluses), envoyé en notification « Relance de votre gérance » et audité.
+
+## Export Excel des retards
+`GET /api/arrears/export` (staff) : classeur `.xlsx` (openpyxl) `retards-AAAA-MM-JJ.xlsx` avec une
+ligne par membre en retard, colonnes lisibles et ligne TOTAL. Renvoyé en base64, téléchargé côté
+navigateur. Audité.
+
+## Prises déjà versées (historique)
+`POST /api/payouts/historical` (permission `record_history`) : enregistre une prise remise **avant
+l'arrivée sur la plateforme** pour une position attribuée — date réelle, montant optionnel,
+`source = historique_gérant` / `historique_administrateur`. Refuse un doublon sur la même position
+(409) et une date mal formée (422). L'interface affiche « Historique enregistré par l'… » sur la
+prise, pour ne jamais la confondre avec une confirmation du jour.
+
 ## Routes frontend
 `/`, `/tontines-disponibles`, `/details-tontine?id=`, `/comment-ca-marche`, `/regles`, `/a-propos`,
 `/conditions-utilisation`, `/politique-confidentialite`, `/connexion`, `/creer-mon-compte`,

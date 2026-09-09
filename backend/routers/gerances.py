@@ -155,20 +155,21 @@ async def update_manager(manager_id: str, payload: ManagerUpdate, admin: dict[st
 
 async def _gerance_stats(gerance_id: str) -> dict[str, int]:
     dues = await db.contribution_due_dates.find({"gerance_id": gerance_id}, {"_id": 0}).to_list(20000)
-    from lib.core import effective_status
+    from lib.core import effective_status, penalty_amount
     from lib.dates import today_iso
 
     today = today_iso()
+    penalty_by_tontine: dict[str, int] = {}
+    async for t in db.tontines.find({"gerance_id": gerance_id}, {"_id": 0, "id": 1, "penalty_per_day": 1}):
+        penalty_by_tontine[t["id"]] = int(t.get("penalty_per_day", 500))
     expected = sum(d["amount"] for d in dues)
     paid = sum(d["amount"] for d in dues if d["status"] == "paid")
     late_rows = [d for d in dues if effective_status(d, today) == "late"]
     late = sum(d["amount"] for d in late_rows)
     pending = expected - paid - late
-    penalties = 0
-    for d in late_rows:
-        from lib.core import late_days
-
-        penalties += late_days(d, today) * 500
+    penalties = sum(
+        penalty_amount(d, today, penalty_by_tontine.get(d["tontine_id"], 500)) for d in late_rows
+    )
     return {
         "total_expected": expected,
         "total_paid": paid,

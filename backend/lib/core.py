@@ -181,6 +181,20 @@ def effective_status(due: dict[str, Any], today: str) -> str:
 
 
 def late_days(due: dict[str, Any], today: str) -> int:
+    """Number of days elapsed since the deadline of this due date (0 if not late).
+
+    A due date is only late from the DAY AFTER its own date: an échéance dated
+    10 Sept is still "à payer" on the 10th and starts counting on the 11th.
+    """
     if due["status"] in ("paid", "processing") or due["date"] >= today:
         return 0
     return (parse_date(today) - parse_date(due["date"])).days
+
+
+def penalty_amount(due: dict[str, Any], today: str, penalty_per_day: int = PENALTY_PER_DAY_DEFAULT) -> int:
+    """One flat penalty per unpaid day once its deadline has passed — it does not compound.
+
+    Spec reference: 5 jours de retard à 3 150 FCFA => 15 750 FCFA de cotisations
+    + 2 500 FCFA de pénalités (= 5 x 500), not 500 per day per missed day.
+    """
+    return penalty_per_day if late_days(due, today) > 0 else 0

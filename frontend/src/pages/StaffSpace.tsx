@@ -27,11 +27,13 @@ import {
   type MemberRow,
   type PaymentProof,
   type MembershipRequest,
+  type ArrearsExport,
   type MyGerance,
   type Notification,
   type Payment,
   type Payout,
   type Position,
+  type RemindResult,
   type Tontine,
 } from "@/lib/types";
 
@@ -120,6 +122,7 @@ function CreateTontineForm() {
 function TontineCard({ t }: { t: Tontine }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [historicalPosition, setHistoricalPosition] = useState<Position | null>(null);
   const positions = useQuery({
     queryKey: ["tontine", t.id, "positions"],
     queryFn: () => apiGet<Position[]>(`/tontines/${t.id}/positions`),
@@ -206,12 +209,22 @@ function TontineCard({ t }: { t: Tontine }) {
                 <Button size="xs" disabled={!p.member_id || p.status === "received"} onClick={() => payout.mutate(p.id)} data-testid={`position-payout-${p.id}`}>
                   Confirmer la prise
                 </Button>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={!p.member_id || p.status === "received"}
+                  onClick={() => setHistoricalPosition(p)}
+                  data-testid={`position-historical-${p.id}`}
+                >
+                  Prise déjà versée
+                </Button>
               </div>
             </div>
           ))}
           {(positions.data ?? []).length === 0 && <Empty text="Aucune position générée." />}
         </div>
       )}
+      <HistoricalPayoutDialog position={historicalPosition} onClose={() => setHistoricalPosition(null)} />
     </div>
   );
 }
@@ -269,6 +282,125 @@ function CreateManagerForm() {
         {create.isPending ? "Création…" : "Créer le gérant et sa gérance"}
       </Button>
     </form>
+  );
+}
+
+function RemindDialog({
+  arrear,
+  onClose,
+}: {
+  arrear: ArrearRow | null;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [message, setMessage] = useState("");
+
+  const send = useMutation({
+    mutationFn: () =>
+      apiPost<RemindResult>("/arrears/remind", {
+        member_id: arrear?.member_id,
+        tontine_id: arrear?.tontine_id,
+        message: message.trim() || undefined,
+      }),
+    onSuccess: (r) => {
+      toast.success(`Relance envoyée — ${fcfa(r.total_due)} réclamés`);
+      setMessage("");
+      qc.invalidateQueries();
+      onClose();
+    },
+    onError: (e) => toast.error(detail(e, "Relance impossible")),
+  });
+
+  return (
+    <Dialog open={Boolean(arrear)} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-[95vw] sm:max-w-md" data-testid="remind-dialog">
+        <DialogHeader>
+          <DialogTitle className="font-heading">Relancer {arrear?.member_name}</DialogTitle>
+        </DialogHeader>
+        {arrear && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {arrear.tontine_name} · {arrear.late_days} jour(s) impayé(s) ·{" "}
+              <strong className="text-foreground">{fcfa(arrear.total_due)}</strong> dus, pénalités incluses.
+              Le récapitulatif est ajouté automatiquement au message.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="remind-message">Message personnalisé (optionnel)</Label>
+              <Textarea
+                id="remind-message"
+                rows={3}
+                placeholder="Bonjour, merci de passer régler vos jours avant vendredi."
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                data-testid="remind-message-input"
+              />
+            </div>
+            <Button className="w-full" disabled={send.isPending} onClick={() => send.mutate()} data-testid="remind-send-button">
+              {send.isPending ? "Envoi…" : "Envoyer la relance"}
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function HistoricalPayoutDialog({
+  position,
+  onClose,
+}: {
+  position: Position | null;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [date, setDate] = useState("");
+  const [amount, setAmount] = useState("");
+
+  const save = useMutation({
+    mutationFn: () =>
+      apiPost<Payout>("/payouts/historical", {
+        position_id: position?.id,
+        payout_date: date,
+        amount: amount ? Number(amount) : undefined,
+      }),
+    onSuccess: () => {
+      toast.success("Prise historique enregistrée");
+      setDate("");
+      setAmount("");
+      qc.invalidateQueries();
+      onClose();
+    },
+    onError: (e) => toast.error(detail(e, "Enregistrement impossible")),
+  });
+
+  return (
+    <Dialog open={Boolean(position)} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-[95vw] sm:max-w-md" data-testid="historical-payout-dialog">
+        <DialogHeader>
+          <DialogTitle className="font-heading">Prise déjà versée</DialogTitle>
+        </DialogHeader>
+        {position && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Position {position.index} — {position.member_name ?? "membre non attribué"}. À utiliser uniquement
+              pour une prise remise <strong className="text-foreground">avant l'arrivée sur la plateforme</strong> :
+              elle sera identifiée comme historique, jamais comme une confirmation du jour.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="hp-date">Date réelle de la remise</Label>
+              <Input id="hp-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} data-testid="historical-payout-date-input" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="hp-amount">Montant remis (laisser vide pour le montant de la tontine)</Label>
+              <Input id="hp-amount" type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} data-testid="historical-payout-amount-input" />
+            </div>
+            <Button className="w-full" disabled={!date || save.isPending} onClick={() => save.mutate()} data-testid="historical-payout-save-button">
+              {save.isPending ? "Enregistrement…" : "Enregistrer la prise historique"}
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -689,6 +821,8 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
   const [tab, setTab] = useState("dashboard");
   const [dueFilter, setDueFilter] = useState("all");
   const [proofId, setProofId] = useState<string | null>(null);
+  const [remindTarget, setRemindTarget] = useState<ArrearRow | null>(null);
+  const [exporting, setExporting] = useState(false);
   const isAdmin = mode === "admin";
 
   const myGerance = useQuery({ queryKey: ["my-gerance"], queryFn: () => apiGet<MyGerance>("/my-gerance"), retry: false });
@@ -964,6 +1098,33 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                 />
               </div>
             )}
+            {(arrears.data ?? []).length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={exporting}
+                  data-testid="arrears-export-button"
+                  onClick={async () => {
+                    setExporting(true);
+                    try {
+                      const file = await apiGet<ArrearsExport>("/arrears/export");
+                      const link = document.createElement("a");
+                      link.href = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${file.content_base64}`;
+                      link.download = file.filename;
+                      link.click();
+                      toast.success(`Export Excel prêt — ${file.rows} ligne(s)`);
+                    } catch (e) {
+                      toast.error(detail(e, "Export impossible"));
+                    } finally {
+                      setExporting(false);
+                    }
+                  }}
+                >
+                  {exporting ? "Export…" : "Exporter en Excel"}
+                </Button>
+              </div>
+            )}
             {(arrears.data ?? []).map((a, i) => (
               <div
                 key={`${a.member_id}-${a.tontine_id}`}
@@ -986,6 +1147,15 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                   <span className="text-muted-foreground">le plus ancien : {a.oldest_unpaid}</span>
                   <span className="text-muted-foreground">{a.paid_days}/{a.total_days} jours payés</span>
                 </p>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="mt-3 w-full sm:w-auto"
+                  onClick={() => setRemindTarget(a)}
+                  data-testid={`arrear-remind-${a.member_id}-${a.tontine_id}`}
+                >
+                  Relancer ce membre
+                </Button>
               </div>
             ))}
             {(arrears.data ?? []).length === 0 && (
@@ -998,6 +1168,11 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
               <div key={p.id} className="rounded-xl border border-border/70 bg-card px-4 py-3 text-sm">
                 <p className="font-medium">{p.member_name} — {fcfa(p.amount)}</p>
                 <p className="text-muted-foreground">{p.tontine_name} · {p.gerance_name} · position {p.position_index} · {p.payout_date} · confirmé par {p.confirmed_by_name}</p>
+                {p.source !== "confirmation" && (
+                  <p className="mt-1 text-xs text-primary" data-testid={`payout-source-${p.id}`}>
+                    Historique enregistré par l'{p.source.replace("historique_", "")}
+                  </p>
+                )}
               </div>
             ))}
             {(payouts.data ?? []).length === 0 && <Empty text="Aucune prise confirmée." testId="staff-payouts-empty" />}
@@ -1027,6 +1202,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
         </Tabs>
       </div>
       <ProofDialog paymentId={proofId} onClose={() => setProofId(null)} />
+      <RemindDialog arrear={remindTarget} onClose={() => setRemindTarget(null)} />
       <BottomBar
         value={tab}
         onChange={setTab}

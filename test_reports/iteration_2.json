@@ -1,0 +1,101 @@
+{
+  "iteration": 2,
+  "passed": 13,
+  "failed": 0,
+  "bugs": [],
+  "action_items": [],
+  "retest_needed": false,
+  "checks": [
+    {
+      "criterion": "CORRECTION SIGNALÉE PAR L'UTILISATEUR — les pénalités ne commencent que le lendemain de l'échéance et ne se cumulent pas",
+      "name": "test_tscheck_penalty_flat_rate.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "2/2 passed. GET /due-dates for qa.kone@anv.ci: 6 rows display_status=late each with penalty==500 (never cumulative 500/1000/1500...), 1 row display_status=due_today with penalty==0. GET /arrears: qa.kone row late_days=6, penalties=3000 (6*500, not the tiered 10500 a cumulative bug would produce)."
+    },
+    {
+      "criterion": "CORRECTION SIGNALÉE PAR L'UTILISATEUR — les pénalités ne commencent que le lendemain de l'échéance et ne se cumulent pas",
+      "name": "member-penalty-flat-rate-display",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Logged in as qa.kone@anv.ci: dashboard stat-total-penalties == '3 000 FCFA' and stat-late-days == '6'. 'Mes cotisations' list contains exactly 6 occurrences of '+500 FCFA pénalité' (no '+1000/1500/2000 FCFA' tiered text anywhere) and the row for 2026-09-09 reads 'À payer aujourd'hui' (0 FCFA penalty, not penalized on the due date itself)."
+    },
+    {
+      "criterion": "Cohérence du calcul de pénalité entre toutes les vues",
+      "name": "test_tscheck_penalty_consistency.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "1/1 passed. For qa.kone@anv.ci: manager GET /arrears penalties=3000 == member GET /summary penalties=3000 == sum(penalty) over member GET /due-dates late rows (3000, 6 rows). All three views agree exactly."
+    },
+    {
+      "criterion": "Cohérence du calcul de pénalité entre toutes les vues",
+      "name": "gerance-penal-scoping-regression",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Manager 'Retards' tab (stat-arrears-penalties tile) and each member row (arrear-total-*) show 3 000 FCFA pénalités for qa.kone, matching the member-side dashboard tile captured while building the check. No view showed a different cumulative figure."
+    },
+    {
+      "criterion": "Relance d'un membre en retard depuis le tableau des retards",
+      "name": "test_tscheck_arrears_remind.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "1/1 passed. POST /arrears/remind {member_id: awa, tontine_id, message: marker} -> 200. Member (qa.awa@anv.ci) GET /notifications then contains a notification whose body includes the marker text, the word 'Relance'/'gérance', and 'FCFA'."
+    },
+    {
+      "criterion": "Relance d'un membre en retard depuis le tableau des retards",
+      "name": "arrears-remind-member-notification",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Manager -> tab-retards -> arrear-remind-<kone> opens remind-dialog showing '6 jour(s) impayé(s)' and total; filled remind-message-input with a unique tscheck- marker, clicked remind-send-button -> success toast shown, dialog closes. Logged in as qa.kone@anv.ci -> tab-notifications -> my-notifications-list contains 'Relance de votre gérance' with the exact typed message AND the FCFA recap."
+    },
+    {
+      "criterion": "Export Excel du tableau des retards",
+      "name": "test_tscheck_arrears_export.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "1/1 passed. GET /arrears/export -> 200, filename 'retards-2026-09-09.xlsx', rows == len(GET /arrears) (2), base64-decoded content starts with 'PK' (valid zip/xlsx) and is >100 bytes."
+    },
+    {
+      "criterion": "Export Excel du tableau des retards",
+      "name": "arrears-export-excel-download",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Manager -> tab-retards -> arrears-export-button triggers a real page.on('download') event, suggestedFilename='retards-2026-09-09.xlsx' (matches ^retards-.*\\.xlsx$), and a toast mentioning 'ligne(s)' is shown afterward."
+    },
+    {
+      "criterion": "Enregistrement d'une prise déjà versée avant l'arrivée sur la plateforme",
+      "name": "test_tscheck_position_historical_payout.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "1/1 passed, using its own isolated tontine (never touches the seeded QA Penal 3150 positions). POST /tontines, /members/create, PATCH /positions/{id}/assign, then POST /payouts/historical -> 200 with status='received' and source containing 'historique'; member GET /notifications contains a body with 'historique'; a second POST /payouts/historical on the same position -> 409 as required."
+    },
+    {
+      "criterion": "Enregistrement d'une prise déjà versée avant l'arrivée sur la plateforme",
+      "name": "position-historical-payout-recorded",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Created isolated fixture tontine + new member 'Tscheck Histpos', assigned to its single position via position-select, opened 'Prise déjà versée' dialog (date + optional amount), submitted -> success toast; Prises tab then lists 'Histpos' with 'Historique enregistré par l'gérant' and the entered date. Re-clicking the same position's historical button afterwards is disabled (second attempt refused). Rerun twice with fresh timestamped fixtures — stable both times."
+    },
+    {
+      "criterion": "Aucune régression sur la vérification des paiements et le cloisonnement",
+      "name": "test_tscheck_penal_gerance_scoping.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "3/3 passed. GET /arrears, /payouts and /due-dates as qa.penal@anv.ci return only rows with gerance_id == manager's own gerance_id (seeded 'Gérance QA Penal' data present). Passing a foreign gerance_id query override on all three endpoints returns an identical row count, proving the manager cannot escape scoping via query manipulation. (Note: removed a stale iteration-1 test file referencing a qa.feat@anv.ci account that no longer authenticates in the current seed — superseded by this file for the current briefing's gerance.)"
+    },
+    {
+      "criterion": "Aucune régression sur la vérification des paiements et le cloisonnement",
+      "name": "gerance-penal-scoping-regression",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "As qa.penal@anv.ci: Retards and Prises lists only contain 'Gérance QA Penal' rows (no 'QA Feat' text). Cotisations tab shows only 'QA Penal 3150' rows; due-filter-late then due-filter-all both work. Fixture: qa.kone submitted a Wave payment with a proof image for a future due date, then manager's Paiements tab 'Voir la preuve' (payment-proof-view -> proof-dialog) opened correctly on that fixture payment without touching any seeded row. Rerun twice — stable both times."
+    },
+    {
+      "criterion": "Ergonomie mobile préservée sur les vues touchées",
+      "name": "mobile-ergonomics-retards-prises-gerance",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "At 390x844 on Retards/Prises/Ma gérance tabs: document.documentElement.scrollWidth - window.innerWidth == 0 on all three. remind-dialog opens fully within the 390px viewport (boundingBox x>=0 and x+width<=391) and closes on Escape. bottom-nav-paiements still switches the active tab (tab-paiements becomes aria-selected=true)."
+    }
+  ]
+}

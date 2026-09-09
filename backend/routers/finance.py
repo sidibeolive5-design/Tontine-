@@ -13,6 +13,8 @@ from lib.core import (
     new_id,
     notify,
     now_utc,
+    parse_date,
+    penalty_amount,
 )
 from lib.dates import today_iso
 from lib.db import db
@@ -69,6 +71,7 @@ async def _due_rows(query: dict[str, Any]) -> list[DueDateOut]:
     today = today_iso()
     names: dict[str, str] = {}
     tnames: dict[str, str] = {}
+    tpenalty: dict[str, int] = {}
     out = []
     for r in rows:
         if r["member_id"] not in names:
@@ -77,15 +80,15 @@ async def _due_rows(query: dict[str, Any]) -> list[DueDateOut]:
         if r["tontine_id"] not in tnames:
             t = await db.tontines.find_one({"id": r["tontine_id"]}, {"_id": 0})
             tnames[r["tontine_id"]] = t["name"] if t else "—"
-        ld = late_days(r, today)
+            tpenalty[r["tontine_id"]] = int(t.get("penalty_per_day", 500)) if t else 500
         out.append(
             DueDateOut(
                 **r,
                 tontine_name=tnames[r["tontine_id"]],
                 member_name=names[r["member_id"]],
                 display_status=effective_status(r, today),
-                late_days=ld,
-                penalty=ld * 500,
+                late_days=late_days(r, today),
+                penalty=penalty_amount(r, today, tpenalty[r["tontine_id"]]),
             )
         )
     return out
@@ -198,7 +201,7 @@ async def arrears(
         member = await db.users.find_one({"id": member_id}, {"_id": 0})
         penalty_per_day = int(tontine.get("penalty_per_day", 500)) if tontine else 500
         late_amount = sum(i["amount"] for i in late)
-        penalties = sum(late_days(i, today) * penalty_per_day for i in late)
+        penalties = sum(penalty_amount(i, today, penalty_per_day) for i in late)
         out.append(
             ArrearRow(
                 member_id=member_id,
@@ -219,6 +222,101 @@ async def arrears(
         )
     out.sort(key=lambda r: r.total_due, reverse=True)
     return out
+
+
+class RemindInput(BaseModel):
+    member_id: str
+    tontine_id: str
+    message: Optional[str] = None
+
+
+@router.post("/arrears/remind")
+async def remind_member(payload: RemindInput, user: dict[str, Any] = Depends(require_staff)):
+    """Personalised nudge sent from the arrears table by the responsible manager."""
+    ensure_permission(user, "send_notifications")
+    tontine = await get_tontine(payload.tontine_id)
+    assert_gerance_access(user, tontine["gerance_id"])
+    member = await db.users.find_one({"id": payload.member_id, "role": "member"}, {"_id": 0})
+    if not member:
+        raise HTTPException(status_code=404, detail="Membre introuvable")
+    if not await db.tontine_members.find_one({"tontine_id": tontine["id"], "member_id": member["id"]}):
+        raise HTTPException(status_code=422, detail="Ce membre n'appartient pas à cette tontine")
+    today = today_iso()
+    dues = await db.contribution_due_dates.find(
+        {"tontine_id": tontine["id"], "member_id": member["id"], "status": "pending"}, {"_id": 0}
+    ).to_list(5000)
+    late = [d for d in dues if effective_status(d, today) == "late"]
+    penalty_per_day = int(tontine.get("penalty_per_day", 500))
+    total_due = sum(d["amount"] for d in late) + sum(penalty_amount(d, today, penalty_per_day) for d in late)
+    custom = (payload.message or "").strip()
+    message = (
+        f"{tontine['name']} : vous avez {len(late)} jour(s) impayé(s), soit {total_due} FCFA "
+        f"(pénalités incluses). Merci de régulariser votre situation."
+    )
+    if custom:
+        message = f"{custom}\n\n{message}"
+    await notify(
+        member["id"],
+        "Relance de votre gérance",
+        message,
+        tontine["gerance_id"],
+        tontine["id"],
+        "manual_reminder",
+    )
+    await audit(user, "member_reminded", "user", member["id"], tontine["gerance_id"],
+                {"tontine_id": tontine["id"], "late_days": len(late), "total_due": total_due})
+    return {"ok": True, "late_days": len(late), "total_due": total_due, "message": message}
+
+
+class ExportOut(BaseModel):
+    filename: str
+    content_base64: str
+    rows: int
+
+
+@router.get("/arrears/export", response_model=ExportOut)
+async def export_arrears(
+    user: dict[str, Any] = Depends(require_staff),
+    gerance_id: Optional[str] = None,
+    tontine_id: Optional[str] = None,
+):
+    """Same data as /arrears, as a .xlsx sheet for gérance meetings."""
+    import base64
+    import io
+
+    from openpyxl import Workbook
+
+    rows = await arrears(user, gerance_id, tontine_id)
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "Retards"
+    headers = [
+        "Rang", "Membre", "Téléphone", "Tontine", "Gérance", "Jours impayés",
+        "Cotisations en retard (FCFA)", "Pénalités (FCFA)", "Total dû (FCFA)",
+        "Plus ancien impayé", "Jours payés", "Jours prévus",
+    ]
+    ws.append(headers)
+    for index, r in enumerate(rows, start=1):
+        ws.append([
+            index, r.member_name, r.member_phone, r.tontine_name, r.gerance_name, r.late_days,
+            r.late_amount, r.penalties, r.total_due, r.oldest_unpaid, r.paid_days, r.total_days,
+        ])
+    ws.append([])
+    ws.append(["", "TOTAL", "", "", "", sum(r.late_days for r in rows),
+               sum(r.late_amount for r in rows), sum(r.penalties for r in rows),
+               sum(r.total_due for r in rows)])
+    for column, width in zip("ABCDEFGHIJKL", (6, 24, 16, 22, 24, 14, 26, 18, 18, 20, 12, 12)):
+        ws.column_dimensions[column].width = width
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    await audit(user, "arrears_exported", "gerance", user.get("gerance_id") or "-",
+                user.get("gerance_id"), {"rows": len(rows)})
+    return ExportOut(
+        filename=f"retards-{today_iso()}.xlsx",
+        content_base64=base64.b64encode(buffer.getvalue()).decode(),
+        rows=len(rows),
+    )
 
 
 class PaymentInput(BaseModel):
@@ -285,15 +383,17 @@ async def submit_payment(payload: PaymentInput, user: dict[str, Any] = Depends(c
     today = today_iso()
     # Amount is computed server-side: the member never types it.
     contribution_amount = sum(d["amount"] for d in dues)
-    penalty_amount = sum(late_days(d, today) * int(tontine.get("penalty_per_day", 500)) for d in dues)
+    penalty_total = sum(
+        penalty_amount(d, today, int(tontine.get("penalty_per_day", 500))) for d in dues
+    )
     payment = {
         "id": new_id(),
         "tontine_id": tontine["id"],
         "gerance_id": tontine["gerance_id"],
         "member_id": user["id"],
-        "amount": contribution_amount + penalty_amount,
+        "amount": contribution_amount + penalty_total,
         "contribution_amount": contribution_amount,
-        "penalty_amount": penalty_amount,
+        "penalty_amount": penalty_total,
         "days": sorted(d["date"] for d in dues),
         "due_date_ids": payload.due_date_ids,
         "method": payload.method,
@@ -460,6 +560,8 @@ class PayoutOut(BaseModel):
     amount: int
     confirmed_by_name: str
     status: str
+    source: str = "confirmation"
+    note: Optional[str] = None
     created_at: Any
 
 
@@ -486,6 +588,7 @@ async def confirm_payout(payload: PayoutInput, user: dict[str, Any] = Depends(re
         "amount": int(tontine["payout_amount"]),
         "confirmed_by": user["id"],
         "status": "received",
+        "source": "confirmation",
         "created_at": now_utc(),
     }
     await db.payouts.insert_one(doc)
@@ -516,6 +619,65 @@ async def _payout_out(p: dict[str, Any], decider: Optional[dict[str, Any]] = Non
         member_name=f"{u['first_name']} {u['last_name']}" if u else "—",
         confirmed_by_name=f"{c['first_name']} {c['last_name']}" if c else "—",
     )
+
+
+class HistoricalPayoutInput(BaseModel):
+    position_id: str
+    payout_date: str
+    amount: Optional[int] = None
+    note: Optional[str] = None
+
+
+@router.post("/payouts/historical", response_model=PayoutOut)
+async def record_historical_payout(
+    payload: HistoricalPayoutInput, user: dict[str, Any] = Depends(require_staff)
+):
+    """A prise already handed over before the tontine arrived on the platform."""
+    ensure_permission(user, "record_history")
+    pos = await db.positions.find_one({"id": payload.position_id}, {"_id": 0})
+    if not pos:
+        raise HTTPException(status_code=404, detail="Position introuvable")
+    assert_gerance_access(user, pos["gerance_id"])
+    if not pos.get("member_id"):
+        raise HTTPException(status_code=400, detail="Attribuez d'abord un membre à cette position")
+    if await db.payouts.find_one({"position_id": pos["id"]}):
+        raise HTTPException(status_code=409, detail="Une prise est déjà enregistrée pour cette position")
+    try:
+        parse_date(payload.payout_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Date invalide (format AAAA-MM-JJ)")
+    tontine = await get_tontine(pos["tontine_id"])
+    label = "administrateur" if user["role"] == "admin" else "gérant"
+    doc = {
+        "id": new_id(),
+        "position_id": pos["id"],
+        "tontine_id": tontine["id"],
+        "gerance_id": tontine["gerance_id"],
+        "member_id": pos["member_id"],
+        "position_index": pos["index"],
+        "payout_date": payload.payout_date,
+        "amount": int(payload.amount) if payload.amount else int(tontine["payout_amount"]),
+        "confirmed_by": user["id"],
+        "status": "received",
+        "source": f"historique_{label}",
+        "note": payload.note,
+        "created_at": now_utc(),
+    }
+    await db.payouts.insert_one(doc)
+    await db.positions.update_one({"id": pos["id"]}, {"$set": {"status": "received"}})
+    await notify(
+        pos["member_id"],
+        "Prise historique enregistrée",
+        f"Historique enregistré par l'{label} : votre prise de {doc['amount']} FCFA pour "
+        f"{tontine['name']} (position {pos['index']}, {payload.payout_date}) a été enregistrée.",
+        tontine["gerance_id"],
+        tontine["id"],
+        "payout_historical",
+    )
+    await audit(user, "payout_historical", "payout", doc["id"], tontine["gerance_id"],
+                {"payout_date": payload.payout_date, "amount": doc["amount"]})
+    doc.pop("_id", None)
+    return await _payout_out(doc, user)
 
 
 @router.get("/payouts", response_model=list[PayoutOut])

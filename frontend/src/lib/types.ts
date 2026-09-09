@@ -196,7 +196,22 @@ export interface Payout {
   amount: number;
   confirmed_by_name: string;
   status: string;
+  source: string;
+  note: string | null;
   created_at: string;
+}
+
+export interface ArrearsExport {
+  filename: string;
+  content_base64: string;
+  rows: number;
+}
+
+export interface RemindResult {
+  ok: boolean;
+  late_days: number;
+  total_due: number;
+  message: string;
 }
 
 export interface Notification {

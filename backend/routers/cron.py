@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 
-from lib.core import effective_status, late_days, new_id, notify, now_utc
+from lib.core import effective_status, late_days, new_id, notify, now_utc, penalty_amount
 from lib.dates import today_iso
 from lib.db import db
 
@@ -44,7 +44,7 @@ async def _send_reminders(run_id: str, slot: Slot) -> None:
         penalty_per_day = int(tontine.get("penalty_per_day", 500))
         due_today = [r for r in rows if r["date"] == today]
         late = [r for r in rows if effective_status(r, today) == "late"]
-        penalties = sum(late_days(r, today) * penalty_per_day for r in late)
+        penalties = sum(penalty_amount(r, today, penalty_per_day) for r in late)
 
         if slot == "evening":
             # Evening pass is only about today's unpaid day, before the deadline bites.
@@ -54,7 +54,7 @@ async def _send_reminders(run_id: str, slot: Slot) -> None:
             amount = sum(r["amount"] for r in due_today)
             message = (
                 f"{tontine['name']} : il vous reste {amount} FCFA à régler avant {deadline} aujourd'hui. "
-                f"Passé cette heure, une pénalité de {penalty_per_day} FCFA par jour de retard s'applique."
+                f"Passé cette heure, une pénalité de {penalty_per_day} FCFA s'ajoutera à cette journée."
             )
         else:
             parts = []
