@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { PublicLayout, Stat, StatusPill, Empty } from "@/components/Shell";
+import { PublicLayout, Stat, StatusPill, Empty, BottomBar, scrollTabs } from "@/components/Shell";
+import { LayoutDashboard, CalendarClock, Users, Bell } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -135,33 +136,44 @@ function PayDialogSection({ dues, methods }: { dues: DueDate[]; methods?: Paymen
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
-      <div className="rounded-2xl border border-border/70 bg-card p-5">
+      <div className="rounded-2xl border border-border/70 bg-card p-4 sm:p-5">
         <h3 className="font-heading text-xl">Calendrier des échéances</h3>
-        <div className="mt-4 max-h-[26rem] space-y-2 overflow-y-auto pr-1" data-testid="due-dates-list">
+        <div className="mt-4 max-h-[22rem] space-y-2 overflow-y-auto pr-1 md:max-h-[26rem]" data-testid="due-dates-list">
           {dues.length === 0 && <Empty text="Aucune échéance : adhérez à une tontine pour démarrer." testId="due-dates-empty" />}
           {dues.map((d) => (
-            <div key={d.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 px-3 py-2.5 text-sm" data-testid={`due-row-${d.id}`}>
+            <label
+              key={d.id}
+              className="flex items-start gap-3 rounded-xl border border-border/60 px-3 py-2.5 text-sm transition-colors duration-200 active:bg-accent/40"
+              data-testid={`due-row-${d.id}`}
+            >
               {d.status === "pending" ? (
                 <Checkbox
+                  className="mt-0.5 shrink-0"
                   checked={selected.includes(d.id)}
                   onCheckedChange={(v) => setSelected((s) => (v ? [...s, d.id] : s.filter((x) => x !== d.id)))}
                   data-testid={`due-checkbox-${d.id}`}
                 />
               ) : (
-                <span className="inline-block size-4" />
+                <span className="mt-0.5 inline-block size-4 shrink-0" />
               )}
-              <span className="w-24 font-medium">{d.date}</span>
-              <span className="w-28">{fcfa(d.amount)}</span>
-              <span className="w-16 text-muted-foreground">{d.deadline_time}</span>
-              <span className="flex-1 truncate text-xs text-muted-foreground">{d.tontine_name}</span>
-              {d.penalty > 0 && <span className="text-xs text-red-700">+{fcfa(d.penalty)} pénalité</span>}
-              <StatusPill value={d.display_status} />
-            </div>
+              <span className="min-w-0 flex-1">
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="font-medium">{d.date}</span>
+                  <span>{fcfa(d.amount)}</span>
+                  <span className="text-muted-foreground">avant {d.deadline_time}</span>
+                  <StatusPill value={d.display_status} />
+                </span>
+                <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                  <span className="truncate">{d.tontine_name}</span>
+                  {d.penalty > 0 && <span className="text-red-700">+{fcfa(d.penalty)} pénalité</span>}
+                </span>
+              </span>
+            </label>
           ))}
         </div>
       </div>
 
-      <div className="rounded-2xl border border-primary/25 bg-primary/5 p-5">
+      <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4 sm:p-5">
         <h3 className="font-heading text-xl">Payer mes jours</h3>
         <p className="mt-1 text-sm text-muted-foreground">Le montant est calculé automatiquement.</p>
         <div className="mt-4 space-y-1 text-sm">
@@ -283,15 +295,15 @@ export default function MemberSpace() {
   const unread = (notifications.data ?? []).filter((n) => !n.read).length;
 
   return (
-    <PublicLayout>
-      <div className="mx-auto w-full max-w-6xl px-5 py-10">
-        <h1 className="font-heading text-4xl" data-testid="member-space-title">Mon espace</h1>
-        <p className="mt-1 text-muted-foreground">
+    <PublicLayout hasBottomBar>
+      <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-5 md:py-10">
+        <h1 className="font-heading text-3xl md:text-4xl" data-testid="member-space-title">Mon espace</h1>
+        <p className="mt-1 text-sm text-muted-foreground md:text-base">
           {me ? `${me.first_name} ${me.last_name}` : "…"} — AIDONS-NOUS VIVANTS
         </p>
 
-        <Tabs value={tab} onValueChange={setTab} className="mt-8">
-          <TabsList variant="line" className="flex-wrap">
+        <Tabs value={tab} onValueChange={setTab} className="mt-6 min-w-0 md:mt-8">
+          <TabsList variant="line" className={scrollTabs}>
             <TabsTrigger value="dashboard" data-testid="tab-dashboard">Tableau de bord</TabsTrigger>
             <TabsTrigger value="profil" data-testid="tab-profil">Mon profil</TabsTrigger>
             <TabsTrigger value="tontines" data-testid="tab-tontines">Mes tontines</TabsTrigger>
@@ -304,7 +316,7 @@ export default function MemberSpace() {
           </TabsList>
 
           <TabsContent value="dashboard" className="mt-6 space-y-6">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <Stat title="Total payé" value={fcfa(totals.paid)} testId="stat-total-paid" />
               <Stat title="Reste à payer" value={fcfa(totals.remaining)} testId="stat-total-remaining" />
               <Stat title="Pénalités" value={fcfa(totals.penalties)} testId="stat-total-penalties" />
@@ -428,6 +440,16 @@ export default function MemberSpace() {
           </TabsContent>
         </Tabs>
       </div>
+      <BottomBar
+        value={tab}
+        onChange={setTab}
+        items={[
+          { value: "dashboard", text: "Accueil", icon: LayoutDashboard },
+          { value: "cotisations", text: "Cotisations", icon: CalendarClock },
+          { value: "tontines", text: "Tontines", icon: Users },
+          { value: "notifications", text: "Alertes", icon: Bell, badge: unread },
+        ]}
+      />
     </PublicLayout>
   );
 }

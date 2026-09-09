@@ -17,9 +17,9 @@ export function AvailableTontines() {
 
   return (
     <PublicLayout>
-      <div className="mx-auto w-full max-w-6xl px-5 py-14">
-        <h1 className="font-heading text-4xl">Tontines disponibles</h1>
-        <p className="mt-2 max-w-2xl text-muted-foreground">
+      <div className="mx-auto w-full max-w-6xl px-4 py-10 md:px-5 md:py-14">
+        <h1 className="font-heading text-3xl md:text-4xl">Tontines disponibles</h1>
+        <p className="mt-2 max-w-2xl text-sm text-muted-foreground md:text-base">
           Chaque tontine appartient à une gérance unique. Consultez la formule avant d'envoyer votre demande d'adhésion.
         </p>
         <div className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-testid="available-tontines-grid">
@@ -94,7 +94,7 @@ export function TontineDetail() {
 
   return (
     <PublicLayout>
-      <div className="mx-auto w-full max-w-5xl px-5 py-14">
+      <div className="mx-auto w-full max-w-5xl px-4 py-10 md:px-5 md:py-14">
         {tontine.isLoading && <Empty text="Chargement de la tontine…" />}
         {!tontine.isLoading && !t && (
           <div data-testid="tontine-not-found">
@@ -109,12 +109,12 @@ export function TontineDetail() {
           <>
             <p className="text-xs uppercase tracking-[0.2em] text-primary">{t.gerance_name}</p>
             <div className="mt-2 flex flex-wrap items-center gap-3">
-              <h1 className="font-heading text-4xl" data-testid="tontine-detail-name">{t.name}</h1>
+              <h1 className="font-heading text-3xl md:text-4xl" data-testid="tontine-detail-name">{t.name}</h1>
               <StatusPill value={t.status} testId="tontine-detail-status" />
             </div>
             <p className="mt-3 max-w-2xl text-muted-foreground">{t.description || "Aucune description fournie."}</p>
 
-            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="mt-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
               {[
                 ["Cotisation quotidienne", `${fcfa(t.daily_amount)}`],
                 ["Montant bénéficiaire", fcfa(t.payout_amount)],
@@ -154,15 +154,15 @@ export function TontineDetail() {
               </div>
             </div>
 
-            <div className="mt-10 rounded-2xl border border-primary/25 bg-primary/5 p-6">
+            <div className="mt-10 rounded-2xl border border-primary/25 bg-primary/5 p-5 md:p-6">
               {me ? (
-                <Button size="lg" onClick={() => join.mutate()} disabled={join.isPending} data-testid="join-tontine-button">
+                <Button size="lg" className="w-full sm:w-auto" onClick={() => join.mutate()} disabled={join.isPending} data-testid="join-tontine-button">
                   {join.isPending ? "Envoi…" : "Adhérer à cette tontine"}
                 </Button>
               ) : (
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
                   <p className="text-sm text-muted-foreground">Créez votre compte pour envoyer une demande d'adhésion.</p>
-                  <Link to="/creer-mon-compte" className={buttonVariants({})} data-testid="detail-register-link">
+                  <Link to="/creer-mon-compte" className={buttonVariants({ className: "shrink-0" })} data-testid="detail-register-link">
                     Créer mon compte
                   </Link>
                 </div>
@@ -231,11 +231,11 @@ export function InfoPage({ slug }: { slug: string }) {
   const page = CONTENT[slug];
   return (
     <PublicLayout>
-      <div className="mx-auto w-full max-w-3xl px-5 py-14">
-        <h1 className="font-heading text-4xl" data-testid="info-page-title">{page?.title ?? "Page"}</h1>
-        <div className="mt-8 space-y-6">
+      <div className="mx-auto w-full max-w-3xl px-4 py-10 md:px-5 md:py-14">
+        <h1 className="font-heading text-3xl md:text-4xl" data-testid="info-page-title">{page?.title ?? "Page"}</h1>
+        <div className="mt-6 space-y-4 md:mt-8 md:space-y-6">
           {(page?.blocks ?? []).map(([h, p]) => (
-            <div key={h} className="rounded-2xl border border-border/70 bg-card p-6">
+            <div key={h} className="rounded-2xl border border-border/70 bg-card p-5 md:p-6">
               <h2 className="font-heading text-xl">{h}</h2>
               <p className="mt-2 text-sm text-muted-foreground">{p}</p>
             </div>

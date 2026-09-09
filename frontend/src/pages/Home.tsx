@@ -26,24 +26,24 @@ export default function Home() {
       <section className="relative overflow-hidden">
         <div className="pointer-events-none absolute -left-24 -top-32 size-[26rem] rounded-full bg-primary/15 blur-3xl animate-glow" />
         <div className="pointer-events-none absolute right-[-8rem] top-24 size-[22rem] rounded-full bg-accent/60 blur-3xl" />
-        <div className="relative mx-auto grid w-full max-w-6xl gap-12 px-5 py-20 lg:grid-cols-[1.15fr_0.85fr] lg:py-28">
+        <div className="relative mx-auto grid w-full max-w-6xl gap-10 px-4 py-12 md:px-5 md:py-20 lg:grid-cols-[1.15fr_0.85fr] lg:py-28">
           <div className="animate-rise">
             <span className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/8 px-3 py-1 text-xs uppercase tracking-[0.2em] text-primary">
               Tontine encadrée • Côte d'Ivoire
             </span>
-            <h1 className="mt-6 font-heading text-5xl leading-[1.05] tracking-tight sm:text-6xl">
+            <h1 className="mt-6 font-heading text-[2.6rem] leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
               Cotiser ensemble,
               <span className="block text-primary">recevoir sereinement.</span>
             </h1>
-            <p className="mt-6 max-w-xl text-lg text-muted-foreground">
+            <p className="mt-5 max-w-xl text-base text-muted-foreground md:mt-6 md:text-lg">
               AIDONS-NOUS VIVANTS encadre vos tontines quotidiennes : cotisations suivies au jour près, preuves de
               paiement vérifiées par un responsable, positions et prises confirmées une par une.
             </p>
-            <div className="mt-9 flex flex-wrap items-center gap-3">
-              <Link to="/creer-mon-compte" className={buttonVariants({ size: "lg" })} data-testid="hero-register-button">
+            <div className="mt-8 flex flex-col items-stretch gap-2.5 sm:flex-row sm:items-center sm:gap-3">
+              <Link to="/creer-mon-compte" className={buttonVariants({ size: "lg", className: "w-full sm:w-auto" })} data-testid="hero-register-button">
                 Créer mon compte
               </Link>
-              <Link to="/connexion" className={buttonVariants({ size: "lg", variant: "ghost" })} data-testid="hero-login-link">
+              <Link to="/connexion" className={buttonVariants({ size: "lg", variant: "ghost", className: "w-full sm:w-auto" })} data-testid="hero-login-link">
                 Déjà un compte ? Se connecter
               </Link>
             </div>
@@ -74,8 +74,8 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-6xl px-5 py-16">
-        <h2 className="font-heading text-3xl">Une plateforme, des règles claires</h2>
+      <section className="mx-auto w-full max-w-6xl px-4 py-12 md:px-5 md:py-16">
+        <h2 className="font-heading text-2xl md:text-3xl">Une plateforme, des règles claires</h2>
         <div className="mt-8 grid gap-4 md:grid-cols-2">
           {PILLARS.map((p, i) => (
             <div
@@ -90,9 +90,9 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-6xl px-5 pb-20">
+      <section className="mx-auto w-full max-w-6xl px-4 pb-16 md:px-5 md:pb-20">
         <div className="flex items-end justify-between gap-4">
-          <h2 className="font-heading text-3xl">Tontines ouvertes</h2>
+          <h2 className="font-heading text-2xl md:text-3xl">Tontines ouvertes</h2>
           <Link to="/tontines-disponibles" className="inline-flex items-center gap-1 text-sm text-primary hover:underline" data-testid="home-all-tontines-link">
             Tout voir <ArrowRight className="size-4" />
           </Link>

@@ -39,8 +39,8 @@ export function Login() {
 
   return (
     <PublicLayout>
-      <div className="mx-auto w-full max-w-md px-5 py-16">
-        <div className="rounded-3xl border border-border/70 bg-card p-8 shadow-xl shadow-primary/5 animate-rise">
+      <div className="mx-auto w-full max-w-md px-4 py-10 md:px-5 md:py-16">
+        <div className="rounded-3xl border border-border/70 bg-card p-6 shadow-xl shadow-primary/5 animate-rise md:p-8">
           <Brand compact />
           <h1 className="mt-6 font-heading text-3xl">Connexion</h1>
           <p className="mt-1 text-sm text-muted-foreground">Accédez à votre espace AIDONS-NOUS VIVANTS.</p>
@@ -99,8 +99,8 @@ export function Register() {
 
   return (
     <PublicLayout>
-      <div className="mx-auto w-full max-w-lg px-5 py-16">
-        <div className="rounded-3xl border border-border/70 bg-card p-8 shadow-xl shadow-primary/5 animate-rise">
+      <div className="mx-auto w-full max-w-lg px-4 py-10 md:px-5 md:py-16">
+        <div className="rounded-3xl border border-border/70 bg-card p-6 shadow-xl shadow-primary/5 animate-rise md:p-8">
           <Brand compact />
           <h1 className="mt-6 font-heading text-3xl">Créer mon compte</h1>
           <p className="mt-1 text-sm text-muted-foreground">La création du compte est gratuite.</p>

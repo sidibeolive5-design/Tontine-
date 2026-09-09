@@ -28,7 +28,8 @@ export default function App() {
         <Route path="/administration" element={<StaffSpace mode="admin" />} />
         <Route path="*" element={<InfoPage slug="a-propos" />} />
       </Routes>
-      <Toaster position="top-right" richColors />
+      {/* Bottom-center on purpose: a top-right toast covers the mobile menu button. */}
+      <Toaster position="bottom-center" offset="5.5rem" richColors />
     </>
   );
 }

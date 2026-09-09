@@ -1,7 +1,9 @@
-import type { ReactNode } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { Menu, X } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { useMe, useSession } from "@/lib/session";
 import { label } from "@/lib/types";
 
@@ -28,17 +30,24 @@ const NAV = [
   { to: "/a-propos", text: "À propos" },
 ];
 
-export function PublicLayout({ children }: { children: ReactNode }) {
+export function PublicLayout({ children, hasBottomBar = false }: { children: ReactNode; hasBottomBar?: boolean }) {
   const { data: me } = useMe();
   const { endSession } = useSession();
   const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const space = me?.role === "admin" ? "/administration" : me?.role === "manager" ? "/gerance" : "/espace-membre";
 
+  const logout = async () => {
+    await endSession();
+    setMenuOpen(false);
+    navigate("/");
+  };
+
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="sticky top-0 z-30 border-b border-border/70 bg-background/85 backdrop-blur-xl">
-        <div className="mx-auto flex w-full max-w-6xl items-center gap-6 px-5 py-3.5">
+    <div className={`min-h-screen flex flex-col ${hasBottomBar ? "pb-[4.5rem] md:pb-0" : ""}`}>
+      <header className="sticky top-0 z-30 border-b border-border/70 bg-background/90 backdrop-blur-xl">
+        <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3 md:gap-6 md:px-5 md:py-3.5">
           <Brand />
           <nav className="hidden md:flex items-center gap-1 text-sm">
             {NAV.map((n) => (
@@ -52,21 +61,15 @@ export function PublicLayout({ children }: { children: ReactNode }) {
               </Link>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-2">
+
+          {/* Desktop actions */}
+          <div className="ml-auto hidden items-center gap-2 md:flex">
             {me ? (
               <>
                 <Link to={space} className={buttonVariants({ size: "sm" })} data-testid="header-space-link">
                   Mon espace
                 </Link>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  data-testid="header-logout-button"
-                  onClick={async () => {
-                    await endSession();
-                    navigate("/");
-                  }}
-                >
+                <Button size="sm" variant="ghost" data-testid="header-logout-button" onClick={logout}>
                   Déconnexion
                 </Button>
               </>
@@ -81,10 +84,84 @@ export function PublicLayout({ children }: { children: ReactNode }) {
               </>
             )}
           </div>
+
+          {/* Mobile: primary CTA + burger menu */}
+          <div className="ml-auto flex items-center gap-1.5 md:hidden">
+            {!me && (
+              <Link to="/creer-mon-compte" className={buttonVariants({ size: "sm" })} data-testid="header-register-link-mobile">
+                Créer
+              </Link>
+            )}
+            <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+              <SheetTrigger
+                className={buttonVariants({ size: "icon-sm", variant: "ghost" })}
+                aria-label="Ouvrir le menu"
+                data-testid="mobile-menu-button"
+              >
+                <Menu className="size-5" />
+              </SheetTrigger>
+              <SheetContent side="right" showCloseButton={false} className="w-[86vw] max-w-sm p-0">
+                <div className="flex items-center justify-between border-b border-border/70 px-5 py-4">
+                  <SheetTitle className="font-heading text-lg">Menu</SheetTitle>
+                  <Button size="icon-sm" variant="ghost" onClick={() => setMenuOpen(false)} aria-label="Fermer" data-testid="mobile-menu-close">
+                    <X className="size-5" />
+                  </Button>
+                </div>
+                <nav className="flex flex-col p-3 text-base">
+                  {me && (
+                    <Link
+                      to={space}
+                      onClick={() => setMenuOpen(false)}
+                      className="rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground"
+                      data-testid="mobile-menu-space-link"
+                    >
+                      Mon espace
+                    </Link>
+                  )}
+                  {NAV.map((n) => (
+                    <Link
+                      key={n.to}
+                      to={n.to}
+                      onClick={() => setMenuOpen(false)}
+                      className="rounded-xl px-4 py-3 transition-colors duration-200 active:bg-accent"
+                      data-testid={`mobile-nav-${n.to.slice(1)}`}
+                    >
+                      {n.text}
+                    </Link>
+                  ))}
+                  <div className="my-2 h-px bg-border" />
+                  {me ? (
+                    <button
+                      onClick={logout}
+                      className="rounded-xl px-4 py-3 text-left text-muted-foreground active:bg-accent"
+                      data-testid="mobile-menu-logout-button"
+                    >
+                      Déconnexion
+                    </button>
+                  ) : (
+                    <Link
+                      to="/connexion"
+                      onClick={() => setMenuOpen(false)}
+                      className="rounded-xl px-4 py-3 active:bg-accent"
+                      data-testid="mobile-menu-login-link"
+                    >
+                      Se connecter
+                    </Link>
+                  )}
+                  <Link to="/conditions-utilisation" onClick={() => setMenuOpen(false)} className="rounded-xl px-4 py-3 text-sm text-muted-foreground">
+                    Conditions d'utilisation
+                  </Link>
+                  <Link to="/politique-confidentialite" onClick={() => setMenuOpen(false)} className="rounded-xl px-4 py-3 text-sm text-muted-foreground">
+                    Politique de confidentialité
+                  </Link>
+                </nav>
+              </SheetContent>
+            </Sheet>
+          </div>
         </div>
       </header>
       <main className="flex-1">{children}</main>
-      <footer className="border-t border-border/70 bg-secondary/40">
+      <footer className={`border-t border-border/70 bg-secondary/40 ${hasBottomBar ? "hidden md:block" : ""}`}>
         <div className="mx-auto grid w-full max-w-6xl gap-6 px-5 py-10 md:grid-cols-3">
           <div className="space-y-3">
             <Brand />
@@ -116,8 +193,67 @@ export function PublicLayout({ children }: { children: ReactNode }) {
   );
 }
 
-const TONE: Record<string, string> = {
-  paid: "bg-emerald-100 text-emerald-800 border-emerald-200",
+/** Horizontally scrollable tab strip on phones, wrapped rows on desktop.
+ *  `w-full`/`max-w-full` are required: TabsList is inline-flex, so without them it
+ *  sizes to its content and pushes the whole document wider than the viewport. */
+export const scrollTabs =
+  "w-full max-w-full flex-nowrap overflow-x-auto no-scrollbar [&>*]:shrink-0 md:flex-wrap";
+
+export interface BottomItem {
+  value: string;
+  text: string;
+  icon: ComponentType<{ className?: string }>;
+  badge?: number;
+}
+
+/** Thumb-reachable bottom navigation — phones only. */
+export function BottomBar({
+  items,
+  value,
+  onChange,
+}: {
+  items: BottomItem[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <nav
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-border/70 bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
+      data-testid="bottom-nav"
+    >
+      <div className="flex items-stretch">
+        {items.map((it) => {
+          const active = value === it.value;
+          return (
+            <button
+              key={it.value}
+              onClick={() => {
+                onChange(it.value);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              data-testid={`bottom-nav-${it.value}`}
+              className={`relative flex flex-1 flex-col items-center gap-1 px-1 py-2.5 text-[0.68rem] transition-colors duration-200 ${
+                active ? "text-primary" : "text-muted-foreground"
+              }`}
+            >
+              <span className={`grid size-8 place-items-center rounded-xl transition-colors duration-200 ${active ? "bg-primary/12" : ""}`}>
+                <it.icon className="size-[1.15rem]" />
+              </span>
+              <span className="leading-none">{it.text}</span>
+              {it.badge ? (
+                <span className="absolute right-1/2 top-1 translate-x-4 rounded-full bg-primary px-1.5 text-[0.6rem] leading-4 text-primary-foreground">
+                  {it.badge}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+const TONE: Record<string, string> = {  paid: "bg-emerald-100 text-emerald-800 border-emerald-200",
   validated: "bg-emerald-100 text-emerald-800 border-emerald-200",
   signed: "bg-emerald-100 text-emerald-800 border-emerald-200",
   accepted: "bg-emerald-100 text-emerald-800 border-emerald-200",

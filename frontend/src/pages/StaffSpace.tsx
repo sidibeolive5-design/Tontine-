@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { PublicLayout, Stat, StatusPill, Empty } from "@/components/Shell";
+import { PublicLayout, Stat, StatusPill, Empty, BottomBar, scrollTabs } from "@/components/Shell";
+import { LayoutDashboard, Landmark, UserPlus, Wallet } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -577,15 +578,15 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
   const pendingPayments = (payments.data ?? []).filter((p) => p.status === "pending");
 
   return (
-    <PublicLayout>
-      <div className="mx-auto w-full max-w-6xl px-5 py-10">
+    <PublicLayout hasBottomBar>
+      <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-5 md:py-10">
         <p className="text-xs uppercase tracking-[0.2em] text-primary">{isAdmin ? "Administration" : "Gérance"}</p>
-        <h1 className="font-heading text-4xl" data-testid="staff-space-title">
+        <h1 className="font-heading text-3xl md:text-4xl" data-testid="staff-space-title">
           {isAdmin ? "Administrateur principal" : g?.name ?? "Ma gérance"}
         </h1>
 
-        <Tabs value={tab} onValueChange={setTab} className="mt-8">
-          <TabsList variant="line" className="flex-wrap">
+        <Tabs value={tab} onValueChange={setTab} className="mt-6 min-w-0 md:mt-8">
+          <TabsList variant="line" className={scrollTabs}>
             <TabsTrigger value="dashboard" data-testid="tab-dashboard">Tableau de bord</TabsTrigger>
             <TabsTrigger value="ma-gerance" data-testid="tab-ma-gerance">Ma gérance</TabsTrigger>
             <TabsTrigger value="membres" data-testid="tab-membres">Membres &amp; invitations</TabsTrigger>
@@ -600,13 +601,13 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
           </TabsList>
 
           <TabsContent value="dashboard" className="mt-6 space-y-6">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <Stat title="Tontines (ma gérance)" value={String(g?.tontine_count ?? 0)} testId="stat-tontines" />
               <Stat title="Membres" value={String(g?.member_count ?? 0)} testId="stat-members" />
               <Stat title="Total encaissé" value={fcfa(g?.total_paid ?? 0)} testId="stat-paid" />
               <Stat title="Paiements à vérifier" value={String(pendingPayments.length)} testId="stat-pending-payments" />
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <Stat title="Total attendu" value={fcfa(g?.total_expected ?? 0)} testId="stat-expected" />
               <Stat title="En attente" value={fcfa(g?.total_pending ?? 0)} testId="stat-pending" />
               <Stat title="En retard" value={fcfa(g?.total_late ?? 0)} testId="stat-late" />
@@ -681,15 +682,16 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
 
           <TabsContent value="demandes" className="mt-6 space-y-2" data-testid="staff-requests-list">
             {(requests.data ?? []).map((r) => (
-              <div key={r.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-card px-4 py-3 text-sm" data-testid={`request-row-${r.id}`}>
-                <span className="font-medium">{r.member_name}</span>
-                <span className="text-muted-foreground">{r.tontine_name}</span>
-                <span className="text-xs text-muted-foreground">{r.gerance_name}</span>
-                <StatusPill value={r.status} />
+              <div key={r.id} className="rounded-xl border border-border/70 bg-card px-4 py-3 text-sm" data-testid={`request-row-${r.id}`}>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="font-medium">{r.member_name}</span>
+                  <StatusPill value={r.status} />
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">{r.tontine_name} · {r.gerance_name}</p>
                 {r.status === "pending" && (
-                  <div className="ml-auto flex gap-2">
-                    <Button size="xs" onClick={() => decideRequest.mutate({ id: r.id, action: "accept" })} data-testid={`request-accept-${r.id}`}>Accepter</Button>
-                    <Button size="xs" variant="ghost" onClick={() => decideRequest.mutate({ id: r.id, action: "reject" })} data-testid={`request-reject-${r.id}`}>Refuser</Button>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button size="sm" className="flex-1 sm:flex-none" onClick={() => decideRequest.mutate({ id: r.id, action: "accept" })} data-testid={`request-accept-${r.id}`}>Accepter</Button>
+                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => decideRequest.mutate({ id: r.id, action: "reject" })} data-testid={`request-reject-${r.id}`}>Refuser</Button>
                   </div>
                 )}
               </div>
@@ -699,15 +701,17 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
 
           <TabsContent value="paiements" className="mt-6 space-y-2" data-testid="staff-payments-list">
             {(payments.data ?? []).map((p) => (
-              <div key={p.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-card px-4 py-3 text-sm" data-testid={`payment-row-${p.id}`}>
-                <span className="font-medium">{p.member_name}</span>
-                <span>{fcfa(p.amount)}</span>
-                <span className="text-xs text-muted-foreground">{p.tontine_name} · {p.gerance_name} · {p.days.length} jour(s)</span>
-                <StatusPill value={p.status} />
+              <div key={p.id} className="rounded-xl border border-border/70 bg-card px-4 py-3 text-sm" data-testid={`payment-row-${p.id}`}>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="font-medium">{p.member_name}</span>
+                  <span>{fcfa(p.amount)}</span>
+                  <StatusPill value={p.status} />
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">{p.tontine_name} · {p.gerance_name} · {p.days.length} jour(s)</p>
                 {p.status === "pending" && (
-                  <div className="ml-auto flex gap-2">
-                    <Button size="xs" onClick={() => decidePayment.mutate({ id: p.id, action: "validate" })} data-testid={`payment-validate-${p.id}`}>Valider le paiement</Button>
-                    <Button size="xs" variant="ghost" onClick={() => decidePayment.mutate({ id: p.id, action: "reject" })} data-testid={`payment-reject-${p.id}`}>Rejeter</Button>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button size="sm" className="flex-1 sm:flex-none" onClick={() => decidePayment.mutate({ id: p.id, action: "validate" })} data-testid={`payment-validate-${p.id}`}>Valider le paiement</Button>
+                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => decidePayment.mutate({ id: p.id, action: "reject" })} data-testid={`payment-reject-${p.id}`}>Rejeter</Button>
                   </div>
                 )}
               </div>
@@ -717,14 +721,18 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
 
           <TabsContent value="cotisations" className="mt-6 space-y-2" data-testid="staff-dues-list">
             {(dues.data ?? []).slice(0, 200).map((d) => (
-              <div key={d.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-card px-4 py-2.5 text-sm">
-                <span className="w-40 truncate font-medium">{d.member_name}</span>
-                <span className="w-24">{d.date}</span>
-                <span className="w-16 text-muted-foreground">{d.deadline_time}</span>
-                <span className="w-28">{fcfa(d.amount)}</span>
-                <span className="flex-1 truncate text-xs text-muted-foreground">{d.tontine_name}</span>
-                {d.penalty > 0 && <span className="text-xs text-red-700">+{fcfa(d.penalty)}</span>}
-                <StatusPill value={d.display_status} />
+              <div key={d.id} className="rounded-xl border border-border/70 bg-card px-4 py-2.5 text-sm">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="font-medium">{d.member_name}</span>
+                  <span>{d.date}</span>
+                  <span className="text-muted-foreground">avant {d.deadline_time}</span>
+                  <span>{fcfa(d.amount)}</span>
+                  <StatusPill value={d.display_status} />
+                </div>
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                  <span className="truncate">{d.tontine_name}</span>
+                  {d.penalty > 0 && <span className="text-red-700">+{fcfa(d.penalty)} pénalité</span>}
+                </p>
               </div>
             ))}
             {(dues.data ?? []).length === 0 && <Empty text="Aucune échéance enregistrée." testId="staff-dues-empty" />}
@@ -763,6 +771,16 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
           </TabsContent>
         </Tabs>
       </div>
+      <BottomBar
+        value={tab}
+        onChange={setTab}
+        items={[
+          { value: "dashboard", text: "Accueil", icon: LayoutDashboard },
+          { value: "ma-gerance", text: "Tontines", icon: Landmark },
+          { value: "membres", text: "Membres", icon: UserPlus },
+          { value: "paiements", text: "Paiements", icon: Wallet, badge: pendingPayments.length },
+        ]}
+      />
     </PublicLayout>
   );
 }

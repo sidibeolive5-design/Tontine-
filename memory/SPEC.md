@@ -45,6 +45,24 @@ redémarrée). Pour rattraper l'historique : `POST /api/due-dates/bulk-history`
 comme `paid` avec `source = "historique_gérant"` ou `"historique_administrateur"` —
 jamais présenté comme un paiement Wave, et tracé dans `audit_logs` + notification au membre.
 
+## Mise en page mobile (couleurs inchangées)
+- `PublicLayout` (components/Shell.tsx) accepte `hasBottomBar` : ajoute le padding bas et masque
+  le pied de page sur téléphone.
+- En-tête : nav complète sur desktop ; sur téléphone, bouton « Créer » + menu latéral
+  (`Sheet` côté droit, testid `mobile-menu-button`) contenant Mon espace, les pages publiques,
+  Déconnexion et les pages légales.
+- `scrollTabs` (exporté par Shell) : la `TabsList` défile horizontalement sur téléphone et se
+  répartit en lignes sur desktop. `w-full max-w-full` est **obligatoire** — `TabsList` est
+  `inline-flex`, sans cela elle se dimensionne sur son contenu et élargit tout le document
+  (débordement horizontal de ~600 px).
+- `BottomBar` (Shell) : barre de navigation basse, `md:hidden`, pilote l'onglet actif.
+  Membre → Accueil / Cotisations / Tontines / Alertes (badge non lus).
+  Gérant-admin → Accueil / Tontines / Membres / Paiements (badge à vérifier).
+- Toasts en `bottom-center` avec `offset="5.5rem"` : en haut à droite ils recouvraient le bouton
+  du menu mobile.
+- Les lignes de listes (échéances, paiements, demandes) passent en blocs empilés sur téléphone
+  (plus de largeurs fixes `w-24`/`w-40`), et les boutons d'action deviennent pleine largeur.
+
 ## Routes frontend
 `/`, `/tontines-disponibles`, `/details-tontine?id=`, `/comment-ca-marche`, `/regles`, `/a-propos`,
 `/conditions-utilisation`, `/politique-confidentialite`, `/connexion`, `/creer-mon-compte`,
