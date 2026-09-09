@@ -18,7 +18,9 @@ import {
   type AuditRow,
   type DueDate,
   type Gerance,
+  type Invitation,
   type Manager,
+  type MemberRow,
   type MembershipRequest,
   type MyGerance,
   type Notification,
@@ -265,6 +267,256 @@ function CreateManagerForm() {
   );
 }
 
+function MembersPanel({ tontines }: { tontines: Tontine[] }) {
+  const qc = useQueryClient();
+  const [mode, setMode] = useState<"direct" | "invite">("direct");
+  const [f, setF] = useState({ first_name: "", last_name: "", phone: "", email: "", password: "", tontine_id: "" });
+  const [hist, setHist] = useState({ tontine_id: "", member_id: "", up_to_date: new Date().toISOString().slice(0, 10) });
+
+  const invitations = useQuery({ queryKey: ["invitations"], queryFn: () => apiGet<Invitation[]>("/invitations"), retry: false });
+  const members = useQuery({ queryKey: ["members"], queryFn: () => apiGet<MemberRow[]>("/members"), retry: false });
+
+  const reset = () => setF({ first_name: "", last_name: "", phone: "", email: "", password: "", tontine_id: "" });
+
+  const createDirect = useMutation({
+    mutationFn: () =>
+      apiPost<{ first_name: string; enrolled_in: string | null }>("/members/create", {
+        ...f,
+        tontine_id: f.tontine_id || undefined,
+      }),
+    onSuccess: (m) => {
+      toast.success(m.enrolled_in ? `Compte créé et ajouté à ${m.enrolled_in}` : "Compte membre créé");
+      reset();
+      qc.invalidateQueries();
+    },
+    onError: (e) => toast.error(detail(e, "Création impossible")),
+  });
+
+  const invite = useMutation({
+    mutationFn: () =>
+      apiPost<Invitation>("/invitations", {
+        first_name: f.first_name,
+        last_name: f.last_name,
+        phone: f.phone,
+        email: f.email,
+        tontine_id: f.tontine_id || undefined,
+      }),
+    onSuccess: async (inv) => {
+      const url = `${window.location.origin}${inv.invite_path}`;
+      await navigator.clipboard?.writeText(url).catch(() => undefined);
+      toast.success("Invitation créée — lien copié");
+      reset();
+      qc.invalidateQueries();
+    },
+    onError: (e) => toast.error(detail(e, "Invitation impossible")),
+  });
+
+  const cancelInvite = useMutation({
+    mutationFn: (id: string) => apiPost<Invitation>(`/invitations/${id}/cancel`),
+    onSuccess: () => {
+      toast.success("Invitation annulée");
+      qc.invalidateQueries();
+    },
+    onError: (e) => toast.error(detail(e, "Annulation impossible")),
+  });
+
+  const enrol = useMutation({
+    mutationFn: (v: { member_id: string; tontine_id: string }) => apiPost<{ tontine_name: string }>("/members/enrol", v),
+    onSuccess: (r) => {
+      toast.success(`Membre ajouté à ${r.tontine_name}`);
+      qc.invalidateQueries();
+    },
+    onError: (e) => toast.error(detail(e, "Ajout impossible")),
+  });
+
+  const bulk = useMutation({
+    mutationFn: () => apiPost<{ updated: number }>("/due-dates/bulk-history", { ...hist, status: "paid" }),
+    onSuccess: (r) => {
+      toast.success(`${r.updated} jour(s) marqué(s) payés (historique)`);
+      qc.invalidateQueries();
+    },
+    onError: (e) => toast.error(detail(e, "Régularisation impossible")),
+  });
+
+  const tontineOptions = (
+    <>
+      <option value="">— Aucune tontine —</option>
+      {tontines.map((t) => (
+        <option key={t.id} value={t.id}>{t.name}</option>
+      ))}
+    </>
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-2xl border border-border/70 bg-card p-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant={mode === "direct" ? "default" : "ghost"} onClick={() => setMode("direct")} data-testid="members-mode-direct">
+            Créer un compte membre
+          </Button>
+          <Button size="sm" variant={mode === "invite" ? "default" : "ghost"} onClick={() => setMode("invite")} data-testid="members-mode-invite">
+            Inviter par lien
+          </Button>
+        </div>
+        <p className="mt-3 text-sm text-muted-foreground">
+          {mode === "direct"
+            ? "Idéal pour une tontine déjà démarrée : vous créez le compte avec un mot de passe provisoire et le rattachez immédiatement."
+            : "Le membre reçoit un lien et choisit lui-même son mot de passe. Vous ne connaissez jamais son mot de passe."}
+        </p>
+        <form
+          className="mt-6 grid gap-4 sm:grid-cols-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            (mode === "direct" ? createDirect : invite).mutate();
+          }}
+        >
+          {([["first_name", "Prénom"], ["last_name", "Nom"], ["phone", "Téléphone"], ["email", "Email"]] as const).map(([k, l]) => (
+            <div key={k} className="space-y-2">
+              <Label htmlFor={`nm-${k}`}>{l}</Label>
+              <Input id={`nm-${k}`} required={k !== "phone"} value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} data-testid={`new-member-${k}-input`} />
+            </div>
+          ))}
+          {mode === "direct" && (
+            <div className="space-y-2">
+              <Label htmlFor="nm-password">Mot de passe provisoire</Label>
+              <Input id="nm-password" type="password" required minLength={6} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} data-testid="new-member-password-input" />
+            </div>
+          )}
+          <div className="space-y-2">
+            <Label htmlFor="nm-tontine">Ajouter à une tontine</Label>
+            <select
+              id="nm-tontine"
+              className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm"
+              value={f.tontine_id}
+              onChange={(e) => setF({ ...f, tontine_id: e.target.value })}
+              data-testid="new-member-tontine-select"
+            >
+              {tontineOptions}
+            </select>
+          </div>
+          <Button type="submit" className="sm:col-span-2" disabled={createDirect.isPending || invite.isPending} data-testid="new-member-submit-button">
+            {mode === "direct" ? "Créer le compte membre" : "Générer le lien d'invitation"}
+          </Button>
+        </form>
+      </div>
+
+      <div className="rounded-2xl border border-border/70 bg-card p-6">
+        <h3 className="font-heading text-xl">Régulariser un historique de cotisations</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Pour une tontine déjà en cours : marque comme payés tous les jours d'un membre jusqu'à la date choisie.
+          L'opération est identifiée comme historique (jamais comme un paiement Wave) et auditée.
+        </p>
+        <div className="mt-5 grid gap-4 sm:grid-cols-3">
+          <div className="space-y-2">
+            <Label htmlFor="h-tontine">Tontine</Label>
+            <select
+              id="h-tontine"
+              className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm"
+              value={hist.tontine_id}
+              onChange={(e) => setHist({ ...hist, tontine_id: e.target.value, member_id: "" })}
+              data-testid="history-tontine-select"
+            >
+              {tontineOptions}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="h-member">Membre</Label>
+            <select
+              id="h-member"
+              className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm"
+              value={hist.member_id}
+              onChange={(e) => setHist({ ...hist, member_id: e.target.value })}
+              data-testid="history-member-select"
+            >
+              <option value="">— Choisir —</option>
+              {(members.data ?? []).map((m) => (
+                <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="h-date">Jusqu'au</Label>
+            <Input id="h-date" type="date" value={hist.up_to_date} onChange={(e) => setHist({ ...hist, up_to_date: e.target.value })} data-testid="history-date-input" />
+          </div>
+        </div>
+        <Button
+          className="mt-4"
+          disabled={!hist.tontine_id || !hist.member_id || bulk.isPending}
+          onClick={() => bulk.mutate()}
+          data-testid="history-bulk-button"
+        >
+          Marquer ces jours comme payés
+        </Button>
+      </div>
+
+      <div className="rounded-2xl border border-border/70 bg-card p-6">
+        <h3 className="font-heading text-xl">Invitations</h3>
+        <div className="mt-4 space-y-2" data-testid="invitations-list">
+          {(invitations.data ?? []).map((i) => (
+            <div key={i.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 px-4 py-3 text-sm">
+              <span className="font-medium">{i.first_name} {i.last_name}</span>
+              <span className="text-muted-foreground">{i.email}</span>
+              <span className="text-xs text-muted-foreground">{i.tontine_name ?? "sans tontine"}</span>
+              <StatusPill value={i.status} />
+              <div className="ml-auto flex gap-2">
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  data-testid={`invitation-copy-${i.id}`}
+                  onClick={() => {
+                    const url = `${window.location.origin}${i.invite_path}`;
+                    navigator.clipboard?.writeText(url).catch(() => undefined);
+                    toast.success("Lien copié");
+                  }}
+                >
+                  Copier le lien
+                </Button>
+                {i.status === "sent" && (
+                  <Button size="xs" variant="ghost" onClick={() => cancelInvite.mutate(i.id)} data-testid={`invitation-cancel-${i.id}`}>
+                    Annuler
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+          {(invitations.data ?? []).length === 0 && <Empty text="Aucune invitation envoyée." testId="invitations-empty" />}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-border/70 bg-card p-6">
+        <h3 className="font-heading text-xl">Membres</h3>
+        <div className="mt-4 space-y-2" data-testid="staff-members-list">
+          {(members.data ?? []).map((m) => (
+            <div key={m.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 px-4 py-3 text-sm">
+              <span className="font-medium">{m.first_name} {m.last_name}</span>
+              <span className="text-muted-foreground">{m.email}</span>
+              <span className="text-xs text-muted-foreground">{m.tontine_count} tontine(s)</span>
+              <span className="text-xs">Identité : {label(m.identity_status)}</span>
+              <div className="ml-auto flex items-center gap-2">
+                <select
+                  className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
+                  defaultValue=""
+                  data-testid={`enrol-select-${m.id}`}
+                  onChange={(e) => {
+                    if (e.target.value) enrol.mutate({ member_id: m.id, tontine_id: e.target.value });
+                    e.target.value = "";
+                  }}
+                >
+                  <option value="">Ajouter à une tontine…</option>
+                  {tontines.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          ))}
+          {(members.data ?? []).length === 0 && <Empty text="Aucun membre dans cette gérance." testId="staff-members-empty" />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
   const { data: me, isLoading } = useMe();
   const qc = useQueryClient();
@@ -336,6 +588,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
           <TabsList variant="line" className="flex-wrap">
             <TabsTrigger value="dashboard" data-testid="tab-dashboard">Tableau de bord</TabsTrigger>
             <TabsTrigger value="ma-gerance" data-testid="tab-ma-gerance">Ma gérance</TabsTrigger>
+            <TabsTrigger value="membres" data-testid="tab-membres">Membres &amp; invitations</TabsTrigger>
             {isAdmin && <TabsTrigger value="supervision" data-testid="tab-supervision">Supervision des gérances</TabsTrigger>}
             {isAdmin && <TabsTrigger value="gerants" data-testid="tab-gerants">Gérants</TabsTrigger>}
             <TabsTrigger value="demandes" data-testid="tab-demandes">Demandes d'adhésion</TabsTrigger>
@@ -373,6 +626,10 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
               {(myTontines.data ?? []).map((t) => <TontineCard key={t.id} t={t} />)}
               {(myTontines.data ?? []).length === 0 && <Empty text="Aucune tontine dans cette gérance." testId="my-gerance-tontines-empty" />}
             </div>
+          </TabsContent>
+
+          <TabsContent value="membres" className="mt-6">
+            <MembersPanel tontines={myTontines.data ?? []} />
           </TabsContent>
 
           {isAdmin && (

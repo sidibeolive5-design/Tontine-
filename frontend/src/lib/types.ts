@@ -252,6 +252,33 @@ export interface TontineMemberRow {
   joined_at: string;
 }
 
+export interface Invitation {
+  id: string;
+  token: string;
+  invite_path: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+  role: string;
+  gerance_id: string;
+  gerance_name: string;
+  tontine_id: string | null;
+  tontine_name: string | null;
+  status: string;
+  created_at: string;
+  accepted_at: string | null;
+}
+
+export interface PublicInvitation {
+  first_name: string;
+  last_name: string;
+  email: string;
+  gerance_name: string;
+  tontine_name: string | null;
+  status: string;
+}
+
 export const fcfa = (n: number) => `${new Intl.NumberFormat("fr-FR").format(n)} FCFA`;
 
 export const STATUS_LABELS: Record<string, string> = {
@@ -280,6 +307,10 @@ export const STATUS_LABELS: Record<string, string> = {
   assigned: "Attribuée",
   verified: "Vérifiée",
   none: "Non fournie",
+  sent: "Invitation envoyée",
+  member: "Membre",
+  manager: "Gérant",
+  admin: "Administrateur",
 };
 
 export const label = (key: string) => STATUS_LABELS[key] ?? key;

@@ -4,6 +4,7 @@ import Home from "@/pages/Home";
 import { Login, Register, Forgot } from "@/pages/Auth";
 import { AvailableTontines, TontineDetail, InfoPage } from "@/pages/Public";
 import MemberSpace from "@/pages/MemberSpace";
+import InvitationPage from "@/pages/Invitation";
 import StaffSpace from "@/pages/StaffSpace";
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="/connexion" element={<Login />} />
         <Route path="/creer-mon-compte" element={<Register />} />
         <Route path="/mot-de-passe-oublie" element={<Forgot />} />
+        <Route path="/invitation" element={<InvitationPage />} />
         <Route path="/espace-membre" element={<MemberSpace />} />
         <Route path="/gerance" element={<StaffSpace mode="manager" />} />
         <Route path="/administration" element={<StaffSpace mode="admin" />} />

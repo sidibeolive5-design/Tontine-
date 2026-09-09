@@ -135,6 +135,41 @@ async def generate_due_dates(tontine: dict[str, Any], member_id: str) -> int:
     return len(rows)
 
 
+async def enroll_member(tontine: dict[str, Any], member_id: str) -> None:
+    """Add a member to a tontine directly: membership row + schedule + contract."""
+    await db.tontine_members.update_one(
+        {"tontine_id": tontine["id"], "member_id": member_id},
+        {
+            "$set": {"status": "active", "gerance_id": tontine["gerance_id"]},
+            "$setOnInsert": {"id": new_id(), "joined_at": now_utc()},
+        },
+        upsert=True,
+    )
+    await generate_due_dates(tontine, member_id)
+    if not await db.contracts.find_one({"tontine_id": tontine["id"], "member_id": member_id}):
+        await db.contracts.insert_one(
+            {
+                "id": new_id(),
+                "tontine_id": tontine["id"],
+                "gerance_id": tontine["gerance_id"],
+                "member_id": member_id,
+                "status": "to_sign",
+                "terms": {
+                    "daily_amount": tontine["daily_amount"],
+                    "payout_amount": tontine["payout_amount"],
+                    "duration_days": tontine["duration_days"],
+                    "start_date": tontine["start_date"],
+                    "end_date": tontine["end_date"],
+                    "interval_days": tontine["interval_days"],
+                    "penalty_per_day": tontine["penalty_per_day"],
+                    "deadline_time": tontine["deadline_time"],
+                },
+                "generated_at": now_utc(),
+                "signed_at": None,
+            }
+        )
+
+
 def effective_status(due: dict[str, Any], today: str) -> str:
     if due["status"] in ("paid", "processing"):
         return due["status"]
