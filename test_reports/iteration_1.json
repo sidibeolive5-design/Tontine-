@@ -1,0 +1,59 @@
+{
+  "iteration": 1,
+  "passed": 7,
+  "failed": 0,
+  "bugs": [],
+  "action_items": [],
+  "retest_needed": false,
+  "checks": [
+    {
+      "criterion": "Le gérant peut agrandir la capture Wave avant de valider un paiement",
+      "name": "gerance-payment-proof-dialog",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Logged in as qa.feat@anv.ci, tab-paiements -> clicked payment-proof-view on the seeded pending payment row; proof-dialog, proof-image and proof-filename all rendered, 'Ouvrir en plein écran' link visible, dialog closes on Escape. No console errors."
+    },
+    {
+      "criterion": "Les filtres de cotisations fonctionnent",
+      "name": "gerance-due-filters",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Live-data pass: due-filter-processing shows only 'En attente de vérification' rows (0 'En retard'), due-filter-late shows only 'En retard' rows (0 processing), due-filter-all shows everything. Deterministic pass: mocked /api/due-dates (dates fixed in 2020, unaffected by server-date drift) to prove due-filter-upcoming with zero matches renders exactly 'Aucune échéance pour ce filtre.' and due-filter-all still shows both mocked rows afterward."
+    },
+    {
+      "criterion": "Import Excel des membres dans une tontine déjà démarrée",
+      "name": "gerance-excel-import-members",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Uploaded a CSV (Prénom,Nom,Email,Téléphone) with a fresh unique email row + the already-enrolled adjo.import@anv.ci row + a missing-email row into tontine 'QA Feat 3150'. import-result showed 'QA Feat 3150 — 1 créé(s), 0 rattaché(s), 2 ignoré(s)': new row -> 'Compte créé', existing member -> 'Ignoré / Participe déjà à cette tontine', invalid row -> 'Ignoré / Email manquant ou invalide'. New member's email then appeared in staff-members-list."
+    },
+    {
+      "criterion": "Le membre a bien reçu le rappel de cotisation quotidien",
+      "name": "member-daily-reminder-notification",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Logged in as qa.payeur@anv.ci, bottom-nav-notifications -> my-notifications-list contains a 'Rappel de cotisation' entry: 'QA Feat 3150 : 3150 FCFA à régler avant 18:00 · 7 jour(s) en retard (22050 FCFA + 14000 FCFA de pénalités).' — mentions tontine name and FCFA amounts as required."
+    },
+    {
+      "criterion": "Aucune promesse d'email non tenue sur « Mot de passe oublié »",
+      "name": "forgot-password-no-false-promise",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "/mot-de-passe-oublie shows the 'La réinitialisation par email n'est pas encore...' explainer and the 'Comment récupérer mon accès ?' button; after submit, no 'Demande notée. Un responsable vous recontactera.' text appears anywhere, and the 'Aucun email n'est envoyé pour...' message is shown instead."
+    },
+    {
+      "criterion": "La navigation mobile reste utilisable sur toutes les vues touchées",
+      "name": "mobile-navigation-usable",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "At 390x844 on both /espace-membre and /gerance: document.documentElement.scrollWidth - window.innerWidth === 0 (no horizontal overflow); mobile-menu-button opens the sheet (mobile-menu-close visible) immediately while the post-login 'Bienvenue' toast is still showing, on both spaces; bottom-nav-cotisations and bottom-nav-paiements correctly switch the active tab content."
+    },
+    {
+      "criterion": "Cloisonnement des gérances préservé",
+      "name": "test_tscheck_gerance_scoping.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "3/3 passed. GET /api/due-dates, /api/payments and /api/members as qa.feat@anv.ci return only rows/members with gerance_id == manager's own gerance (seeded QA Feat 3150 data present, e.g. qa.payeur@anv.ci in members list). Passing a foreign gerance_id query override on all three endpoints returns an identical result set (server ignores the override for role=manager per lib scoping in finance.py/gerances.py _scope()), proving a manager cannot escape their own gerance via query manipulation."
+    }
+  ]
+}

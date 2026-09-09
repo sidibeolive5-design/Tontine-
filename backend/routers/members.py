@@ -307,6 +307,165 @@ async def enrol_existing(payload: EnrolExisting, user: dict[str, Any] = Depends(
     return {"ok": True, "tontine_name": tontine["name"]}
 
 
+class ImportInput(BaseModel):
+    tontine_id: str
+    file_base64: str = Field(min_length=10)  # data URL or raw base64 of a .xlsx / .csv
+    filename: str = "membres.xlsx"
+
+
+class ImportRow(BaseModel):
+    line: int
+    first_name: str
+    last_name: str
+    email: str
+    status: str  # created | enrolled | skipped
+    message: str
+
+
+class ImportResult(BaseModel):
+    tontine_name: str
+    created: int
+    enrolled: int
+    skipped: int
+    rows: list[ImportRow]
+
+
+HEADER_ALIASES = {
+    "prenom": "first_name", "prénom": "first_name", "first_name": "first_name", "firstname": "first_name",
+    "nom": "last_name", "last_name": "last_name", "lastname": "last_name",
+    "email": "email", "mail": "email", "e-mail": "email",
+    "telephone": "phone", "téléphone": "phone", "phone": "phone", "tel": "phone",
+}
+
+
+def _parse_sheet(raw: bytes, filename: str) -> list[dict[str, str]]:
+    """Read a .xlsx (openpyxl) or .csv into normalised dict rows."""
+    import csv
+    import io
+
+    if filename.lower().endswith(".csv"):
+        text = raw.decode("utf-8-sig", errors="replace")
+        sample = text[:2000]
+        delimiter = ";" if sample.count(";") > sample.count(",") else ","
+        reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+        table = [[(c or "").strip() for c in row] for row in reader]
+    else:
+        from openpyxl import load_workbook
+
+        wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+        ws = wb.active
+        if ws is None:
+            return []
+        table = [[("" if c is None else str(c)).strip() for c in row] for row in ws.iter_rows(values_only=True)]
+    table = [r for r in table if any(r)]
+    if not table:
+        return []
+    header = [HEADER_ALIASES.get(h.strip().lower(), "") for h in table[0]]
+    if "email" not in header:
+        raise HTTPException(
+            status_code=422,
+            detail="Colonnes attendues : Prénom, Nom, Email, Téléphone (la colonne Email est obligatoire)",
+        )
+    rows: list[dict[str, str]] = []
+    for raw_row in table[1:]:
+        row = {"first_name": "", "last_name": "", "email": "", "phone": ""}
+        for key, value in zip(header, raw_row):
+            if key:
+                row[key] = value
+        rows.append(row)
+    return rows
+
+
+@router.post("/members/import", response_model=ImportResult)
+async def import_members(payload: ImportInput, user: dict[str, Any] = Depends(require_staff)):
+    """Bulk-enrol the members of a tontine already running, from an Excel/CSV sheet."""
+    ensure_permission(user, "manage_members")
+    tontine = await get_tontine(payload.tontine_id)
+    assert_gerance_access(user, tontine["gerance_id"])
+    import base64
+    import binascii
+
+    encoded = payload.file_base64.split(",", 1)[-1]
+    try:
+        raw = base64.b64decode(encoded, validate=False)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=422, detail="Fichier illisible")
+    try:
+        sheet = _parse_sheet(raw, payload.filename)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=422, detail="Fichier illisible : utilisez un .xlsx ou un .csv")
+    if not sheet:
+        raise HTTPException(status_code=422, detail="Le fichier ne contient aucune ligne exploitable")
+
+    out: list[ImportRow] = []
+    created = enrolled = skipped = 0
+    for index, row in enumerate(sheet, start=2):
+        email = row["email"].strip().lower()
+        first = row["first_name"].strip()
+        last = row["last_name"].strip()
+        if not email or "@" not in email:
+            skipped += 1
+            out.append(ImportRow(line=index, first_name=first, last_name=last, email=row["email"],
+                                 status="skipped", message="Email manquant ou invalide"))
+            continue
+        existing = await db.users.find_one({"email": email}, {"_id": 0})
+        if existing:
+            if existing["role"] != "member":
+                skipped += 1
+                out.append(ImportRow(line=index, first_name=first, last_name=last, email=email,
+                                     status="skipped", message="Ce compte n'est pas un compte membre"))
+                continue
+            member_id = existing["id"]
+            already = await db.tontine_members.find_one({"tontine_id": tontine["id"], "member_id": member_id})
+            if already:
+                skipped += 1
+                out.append(ImportRow(line=index, first_name=existing["first_name"], last_name=existing["last_name"],
+                                     email=email, status="skipped", message="Participe déjà à cette tontine"))
+                continue
+            await enroll_member(tontine, member_id)
+            enrolled += 1
+            out.append(ImportRow(line=index, first_name=existing["first_name"], last_name=existing["last_name"],
+                                 email=email, status="enrolled", message="Compte existant rattaché à la tontine"))
+        else:
+            if not first or not last:
+                skipped += 1
+                out.append(ImportRow(line=index, first_name=first, last_name=last, email=email,
+                                     status="skipped", message="Prénom et nom obligatoires pour un nouveau compte"))
+                continue
+            member_id = new_id()
+            await db.users.insert_one({
+                "id": member_id, "first_name": first, "last_name": last, "phone": row["phone"].strip(),
+                "email": email, "password_hash": hash_password(secrets.token_urlsafe(12)), "role": "member",
+                "status": "active", "gerance_id": None, "permissions": [], "profile_complete": False,
+                "identity_status": "none", "address": None, "extra_info": None, "created_at": now_utc(),
+            })
+            await enroll_member(tontine, member_id)
+            invitation = {
+                "id": new_id(), "token": secrets.token_urlsafe(24), "first_name": first, "last_name": last,
+                "phone": row["phone"].strip(), "email": email, "role": "member",
+                "gerance_id": tontine["gerance_id"], "tontine_id": tontine["id"], "invited_by": user["id"],
+                "status": "cancelled", "created_at": now_utc(), "accepted_at": None,
+                "note": "compte créé par import — mot de passe à définir par le responsable",
+            }
+            await db.invitations.insert_one(invitation)
+            created += 1
+            out.append(ImportRow(line=index, first_name=first, last_name=last, email=email,
+                                 status="created", message="Compte créé et rattaché à la tontine"))
+        await notify(
+            member_id,
+            "Vous êtes inscrit à une tontine",
+            f"Vous avez été ajouté à {tontine['name']} par le responsable de la gérance.",
+            tontine["gerance_id"],
+            tontine["id"],
+            "member_enrolled",
+        )
+    await audit(user, "members_imported", "tontine", tontine["id"], tontine["gerance_id"],
+                {"created": created, "enrolled": enrolled, "skipped": skipped, "filename": payload.filename})
+    return ImportResult(tontine_name=tontine["name"], created=created, enrolled=enrolled, skipped=skipped, rows=out)
+
+
 class BulkRegularise(BaseModel):
     tontine_id: str
     member_id: str

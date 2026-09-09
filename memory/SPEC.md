@@ -63,6 +63,29 @@ jamais présenté comme un paiement Wave, et tracé dans `audit_logs` + notifica
 - Les lignes de listes (échéances, paiements, demandes) passent en blocs empilés sur téléphone
   (plus de largeurs fixes `w-24`/`w-40`), et les boutons d'action deviennent pleine largeur.
 
+## Rappels quotidiens (cron plateforme)
+`.emergent/crons.yml` → `rappel-echeances`, tous les jours à 07h00 `Africa/Abidjan`,
+`POST /api/cron/daily-reminders` (routers/cron.py). Authentification
+`Authorization: Bearer $WEBHOOK_CRON_SECRET` (backend/.env), idempotence sur `X-Webhook-Id`
+(collection `cron_runs`), travail réel exécuté en tâche de fond. Une notification par membre,
+par tontine et par jour (clé `dedupe_key` dans `notification_deliveries`) : montant du jour +
+jours en retard et pénalités. Aucune duplication même si le cron est rejoué.
+
+## Import Excel des membres
+`POST /api/members/import` (permission `manage_members`) : fichier `.xlsx` (openpyxl) ou `.csv`
+en base64, colonnes Prénom / Nom / Email / Téléphone (Email obligatoire). Un compte existant est
+rattaché sans doublon, un nouveau compte est créé puis enrôlé (`enroll_member`). Le résultat
+détaille chaque ligne : `created` / `enrolled` / `skipped` + motif. Audité.
+
+## Aperçu de la preuve de paiement
+`GET /api/payments/{id}/proof` reste privé (membre propriétaire, gérant de la gérance, admin).
+Côté gérant/admin, bouton « Voir la preuve » → `Dialog` avec image zoomable (conteneur
+`overflow-auto`, pinch-to-zoom sur téléphone) + « Ouvrir en plein écran ».
+
+## Filtres des cotisations (espace gérant/admin)
+Tous · À jour · En retard · Paiements à vérifier · Pénalités · Aujourd'hui · À venir —
+filtrage client sur les lignes de `contribution_due_dates` déjà renvoyées par `/api/due-dates`.
+
 ## Routes frontend
 `/`, `/tontines-disponibles`, `/details-tontine?id=`, `/comment-ca-marche`, `/regles`, `/a-propos`,
 `/conditions-utilisation`, `/politique-confidentialite`, `/connexion`, `/creer-mon-compte`,

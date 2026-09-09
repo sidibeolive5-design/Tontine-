@@ -61,6 +61,7 @@ async def get_status_checks():
     return [StatusCheck(**status_check) for status_check in status_checks]
 
 from routers import auth as auth_router  # noqa: E402
+from routers import cron as cron_router  # noqa: E402
 from routers import finance as finance_router  # noqa: E402
 from routers import gerances as gerances_router  # noqa: E402
 from routers import members as members_router  # noqa: E402
@@ -73,6 +74,7 @@ api_router.include_router(tontines_router.router, tags=["tontines"])
 api_router.include_router(members_router.router, tags=["members"])
 api_router.include_router(finance_router.router, tags=["finance"])
 api_router.include_router(notifications_router.router, tags=["notifications"])
+api_router.include_router(cron_router.router, tags=["cron"])
 
 # Include the router in the main app
 app.include_router(api_router)

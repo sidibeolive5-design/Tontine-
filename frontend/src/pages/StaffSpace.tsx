@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiGet, apiPatch, apiPost, ApiError } from "@/lib/api";
 import { useMe } from "@/lib/session";
@@ -19,9 +20,11 @@ import {
   type AuditRow,
   type DueDate,
   type Gerance,
+  type ImportResult,
   type Invitation,
   type Manager,
   type MemberRow,
+  type PaymentProof,
   type MembershipRequest,
   type MyGerance,
   type Notification,
@@ -244,7 +247,7 @@ function CreateManagerForm() {
       <div className="space-y-2 sm:col-span-2">
         <Label htmlFor="m-password">Mot de passe provisoire</Label>
         <Input id="m-password" type="password" required minLength={6} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} data-testid="manager-password-input" />
-        <p className="text-xs text-muted-foreground">Communiquez-le au gérant : il pourra le modifier depuis son espace.</p>
+        <p className="mt-1 text-xs text-muted-foreground">Communiquez-le au gérant : il en aura besoin pour sa première connexion.</p>
       </div>
       <div className="sm:col-span-2">
         <p className="text-sm font-medium">Permissions</p>
@@ -265,6 +268,136 @@ function CreateManagerForm() {
         {create.isPending ? "Création…" : "Créer le gérant et sa gérance"}
       </Button>
     </form>
+  );
+}
+
+function ProofDialog({ paymentId, onClose }: { paymentId: string | null; onClose: () => void }) {
+  const proof = useQuery({
+    queryKey: ["payment-proof", paymentId],
+    queryFn: () => apiGet<PaymentProof>(`/payments/${paymentId}/proof`),
+    enabled: Boolean(paymentId),
+    retry: false,
+  });
+
+  return (
+    <Dialog open={Boolean(paymentId)} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-[95vw] sm:max-w-lg" data-testid="proof-dialog">
+        <DialogHeader>
+          <DialogTitle className="font-heading">Preuve de paiement</DialogTitle>
+        </DialogHeader>
+        {proof.isLoading && <Empty text="Chargement de la preuve…" />}
+        {proof.isError && <Empty text="Preuve indisponible." testId="proof-dialog-error" />}
+        {proof.data && (
+          <div className="space-y-3">
+            <p className="truncate text-xs text-muted-foreground" data-testid="proof-filename">{proof.data.proof_filename}</p>
+            {/* Pinch-to-zoom: the image scrolls inside its own box on a phone. */}
+            <div className="max-h-[65vh] overflow-auto rounded-xl border border-border/70 bg-muted/30 touch-pan-x touch-pan-y">
+              <img src={proof.data.proof_image} alt="Preuve de paiement" className="w-full" data-testid="proof-image" />
+            </div>
+            <a
+              href={proof.data.proof_image}
+              target="_blank"
+              rel="noreferrer"
+              className={buttonVariants({ variant: "outline", className: "w-full" })}
+              data-testid="proof-open-full"
+            >
+              Ouvrir en plein écran
+            </a>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ImportMembersCard({ tontines }: { tontines: Tontine[] }) {
+  const qc = useQueryClient();
+  const [tontineId, setTontineId] = useState("");
+  const [file, setFile] = useState<{ data: string; name: string } | null>(null);
+  const [result, setResult] = useState<ImportResult | null>(null);
+
+  const run = useMutation({
+    mutationFn: () =>
+      apiPost<ImportResult>("/members/import", {
+        tontine_id: tontineId,
+        file_base64: file?.data,
+        filename: file?.name,
+      }),
+    onSuccess: (r) => {
+      setResult(r);
+      setFile(null);
+      toast.success(`${r.created} compte(s) créé(s), ${r.enrolled} rattaché(s), ${r.skipped} ignoré(s)`);
+      qc.invalidateQueries();
+    },
+    onError: (e) => toast.error(detail(e, "Import impossible")),
+  });
+
+  return (
+    <div className="rounded-2xl border border-border/70 bg-card p-6">
+      <h3 className="font-heading text-xl">Importer les membres depuis un fichier Excel</h3>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Colonnes attendues : <strong>Prénom</strong>, <strong>Nom</strong>, <strong>Email</strong>,{" "}
+        <strong>Téléphone</strong>. Formats acceptés : .xlsx ou .csv. Les comptes déjà existants sont simplement
+        rattachés à la tontine, sans doublon.
+      </p>
+      <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="imp-tontine">Tontine de destination</Label>
+          <select
+            id="imp-tontine"
+            className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm"
+            value={tontineId}
+            onChange={(e) => setTontineId(e.target.value)}
+            data-testid="import-tontine-select"
+          >
+            <option value="">— Choisir —</option>
+            {tontines.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="imp-file">Fichier</Label>
+          <Input
+            id="imp-file"
+            type="file"
+            accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            data-testid="import-file-input"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              const reader = new FileReader();
+              reader.onload = () => setFile({ data: String(reader.result), name: f.name });
+              reader.readAsDataURL(f);
+            }}
+          />
+        </div>
+      </div>
+      <Button
+        className="mt-4 w-full sm:w-auto"
+        disabled={!tontineId || !file || run.isPending}
+        onClick={() => run.mutate()}
+        data-testid="import-submit-button"
+      >
+        {run.isPending ? "Import en cours…" : "Importer les membres"}
+      </Button>
+      {result && (
+        <div className="mt-5 space-y-2" data-testid="import-result">
+          <p className="text-sm">
+            {result.tontine_name} — {result.created} créé(s), {result.enrolled} rattaché(s), {result.skipped} ignoré(s)
+          </p>
+          {result.rows.map((r) => (
+            <div key={r.line} className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 px-3 py-2 text-xs">
+              <span className="font-medium">Ligne {r.line}</span>
+              <span>{r.first_name} {r.last_name}</span>
+              <span className="text-muted-foreground">{r.email}</span>
+              <StatusPill value={r.status} />
+              <span className="text-muted-foreground">{r.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -361,8 +494,8 @@ function MembersPanel({ tontines }: { tontines: Tontine[] }) {
         </div>
         <p className="mt-3 text-sm text-muted-foreground">
           {mode === "direct"
-            ? "Idéal pour une tontine déjà démarrée : vous créez le compte avec un mot de passe provisoire et le rattachez immédiatement."
-            : "Le membre reçoit un lien et choisit lui-même son mot de passe. Vous ne connaissez jamais son mot de passe."}
+            ? "Idéal pour une tontine déjà démarrée : vous créez le compte avec un mot de passe provisoire et vous le rattachez immédiatement."
+            : "Le membre reçoit un lien et choisit lui-même son mot de passe. Vous ne connaîtrez jamais son mot de passe."}
         </p>
         <form
           className="mt-6 grid gap-4 sm:grid-cols-2"
@@ -400,6 +533,8 @@ function MembersPanel({ tontines }: { tontines: Tontine[] }) {
           </Button>
         </form>
       </div>
+
+      <ImportMembersCard tontines={tontines} />
 
       <div className="rounded-2xl border border-border/70 bg-card p-6">
         <h3 className="font-heading text-xl">Régulariser un historique de cotisations</h3>
@@ -518,10 +653,41 @@ function MembersPanel({ tontines }: { tontines: Tontine[] }) {
   );
 }
 
+const DUE_FILTERS: [string, string][] = [
+  ["all", "Tous"],
+  ["paid", "À jour"],
+  ["late", "En retard"],
+  ["processing", "Paiements à vérifier"],
+  ["penalties", "Pénalités"],
+  ["today", "Aujourd'hui"],
+  ["upcoming", "À venir"],
+];
+
+function matchesDueFilter(d: DueDate, filter: string, today: string): boolean {
+  switch (filter) {
+    case "paid":
+      return d.status === "paid";
+    case "late":
+      return d.display_status === "late";
+    case "processing":
+      return d.status === "processing";
+    case "penalties":
+      return d.penalty > 0;
+    case "today":
+      return d.date === today;
+    case "upcoming":
+      return d.date > today;
+    default:
+      return true;
+  }
+}
+
 export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
   const { data: me, isLoading } = useMe();
   const qc = useQueryClient();
   const [tab, setTab] = useState("dashboard");
+  const [dueFilter, setDueFilter] = useState("all");
+  const [proofId, setProofId] = useState<string | null>(null);
   const isAdmin = mode === "admin";
 
   const myGerance = useQuery({ queryKey: ["my-gerance"], queryFn: () => apiGet<MyGerance>("/my-gerance"), retry: false });
@@ -576,6 +742,8 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
 
   const g = myGerance.data;
   const pendingPayments = (payments.data ?? []).filter((p) => p.status === "pending");
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const filteredDues = (dues.data ?? []).filter((d) => matchesDueFilter(d, dueFilter, todayIso));
 
   return (
     <PublicLayout hasBottomBar>
@@ -708,19 +876,44 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                   <StatusPill value={p.status} />
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">{p.tontine_name} · {p.gerance_name} · {p.days.length} jour(s)</p>
-                {p.status === "pending" && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button size="sm" className="flex-1 sm:flex-none" onClick={() => decidePayment.mutate({ id: p.id, action: "validate" })} data-testid={`payment-validate-${p.id}`}>Valider le paiement</Button>
-                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => decidePayment.mutate({ id: p.id, action: "reject" })} data-testid={`payment-reject-${p.id}`}>Rejeter</Button>
-                  </div>
-                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1 sm:flex-none"
+                    onClick={() => setProofId(p.id)}
+                    data-testid={`payment-proof-view-${p.id}`}
+                  >
+                    Voir la preuve
+                  </Button>
+                  {p.status === "pending" && (
+                    <>
+                      <Button size="sm" className="flex-1 sm:flex-none" onClick={() => decidePayment.mutate({ id: p.id, action: "validate" })} data-testid={`payment-validate-${p.id}`}>Valider le paiement</Button>
+                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => decidePayment.mutate({ id: p.id, action: "reject" })} data-testid={`payment-reject-${p.id}`}>Rejeter</Button>
+                    </>
+                  )}
+                </div>
               </div>
             ))}
             {(payments.data ?? []).length === 0 && <Empty text="Aucun paiement." testId="staff-payments-empty" />}
           </TabsContent>
 
           <TabsContent value="cotisations" className="mt-6 space-y-2" data-testid="staff-dues-list">
-            {(dues.data ?? []).slice(0, 200).map((d) => (
+            <div className="flex flex-nowrap gap-2 overflow-x-auto no-scrollbar pb-1 md:flex-wrap" data-testid="due-filters">
+              {DUE_FILTERS.map(([key, text]) => (
+                <Button
+                  key={key}
+                  size="sm"
+                  variant={dueFilter === key ? "default" : "outline"}
+                  className="shrink-0"
+                  onClick={() => setDueFilter(key)}
+                  data-testid={`due-filter-${key}`}
+                >
+                  {text}
+                </Button>
+              ))}
+            </div>
+            {filteredDues.slice(0, 200).map((d) => (
               <div key={d.id} className="rounded-xl border border-border/70 bg-card px-4 py-2.5 text-sm">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="font-medium">{d.member_name}</span>
@@ -735,7 +928,12 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                 </p>
               </div>
             ))}
-            {(dues.data ?? []).length === 0 && <Empty text="Aucune échéance enregistrée." testId="staff-dues-empty" />}
+            {filteredDues.length === 0 && (
+              <Empty
+                text={(dues.data ?? []).length === 0 ? "Aucune échéance enregistrée." : "Aucune échéance pour ce filtre."}
+                testId="staff-dues-empty"
+              />
+            )}
           </TabsContent>
 
           <TabsContent value="prises" className="mt-6 space-y-2" data-testid="staff-payouts-list">
@@ -771,6 +969,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
           </TabsContent>
         </Tabs>
       </div>
+      <ProofDialog paymentId={proofId} onClose={() => setProofId(null)} />
       <BottomBar
         value={tab}
         onChange={setTab}

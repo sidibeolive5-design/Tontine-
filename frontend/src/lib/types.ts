@@ -279,6 +279,28 @@ export interface PublicInvitation {
   status: string;
 }
 
+export interface ImportRow {
+  line: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+  status: string;
+  message: string;
+}
+
+export interface ImportResult {
+  tontine_name: string;
+  created: number;
+  enrolled: number;
+  skipped: number;
+  rows: ImportRow[];
+}
+
+export interface PaymentProof {
+  proof_image: string;
+  proof_filename: string;
+}
+
 export const fcfa = (n: number) => `${new Intl.NumberFormat("fr-FR").format(n)} FCFA`;
 
 export const STATUS_LABELS: Record<string, string> = {
@@ -311,6 +333,9 @@ export const STATUS_LABELS: Record<string, string> = {
   member: "Membre",
   manager: "Gérant",
   admin: "Administrateur",
+  created: "Compte créé",
+  enrolled: "Rattaché",
+  skipped: "Ignoré",
 };
 
 export const label = (key: string) => STATUS_LABELS[key] ?? key;

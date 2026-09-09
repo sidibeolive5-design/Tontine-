@@ -163,7 +163,7 @@ export function Forgot() {
         <div className="rounded-3xl border border-border/70 bg-card p-8 shadow-xl shadow-primary/5">
           <h1 className="font-heading text-3xl">Mot de passe oublié</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            La réinitialisation par email n'est pas encore activée sur cette version. Contactez le responsable de votre
+            La réinitialisation par email n'est pas encore activée dans cette version. Contactez le responsable de votre
             gérance : il pourra vous réattribuer un accès.
           </p>
           <div className="mt-6 space-y-2">
@@ -173,9 +173,15 @@ export function Forgot() {
           <Button
             className="mt-4 w-full"
             data-testid="forgot-submit-button"
-            onClick={() => toast.info("Demande notée. Un responsable vous recontactera.")}
+            onClick={() =>
+              toast.info(
+                email
+                  ? "Aucun email n'est envoyé pour l'instant : contactez le responsable de votre gérance pour rétablir votre accès."
+                  : "Saisissez votre email, puis contactez le responsable de votre gérance pour rétablir votre accès.",
+              )
+            }
           >
-            Envoyer ma demande
+            Comment récupérer mon accès ?
           </Button>
         </div>
       </div>
