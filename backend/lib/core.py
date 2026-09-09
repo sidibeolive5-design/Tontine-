@@ -7,7 +7,6 @@ from typing import Any, Optional
 from fastapi import HTTPException
 
 from lib.db import db
-
 PENALTY_PER_DAY_DEFAULT = 500
 
 
@@ -103,8 +102,11 @@ def position_dates(start: date, interval_days: int, count: int) -> list[str]:
     return [(start + timedelta(days=interval_days * (i + 1))).isoformat() for i in range(count)]
 
 
-async def generate_due_dates(tontine: dict[str, Any], member_id: str) -> int:
-    """One row per day of the tontine for this member — the single source of truth."""
+async def generate_due_dates(tontine: dict[str, Any], member_id: str, branches: int = 1) -> int:
+    """One row per day of the tontine for this member — the single source of truth.
+
+    The daily amount is multiplied by the number of branches (parts) held.
+    """
     existing = await db.contribution_due_dates.count_documents(
         {"tontine_id": tontine["id"], "member_id": member_id}
     )
@@ -121,7 +123,8 @@ async def generate_due_dates(tontine: dict[str, Any], member_id: str) -> int:
                 "member_id": member_id,
                 "date": (start + timedelta(days=i)).isoformat(),
                 "deadline_time": tontine.get("deadline_time", "18:00"),
-                "amount": int(tontine["daily_amount"]),
+                "amount": int(tontine["daily_amount"]) * max(int(branches), 1),
+                "branches": max(int(branches), 1),
                 "period": i + 1,
                 "status": "pending",
                 "payment_id": None,
@@ -135,17 +138,60 @@ async def generate_due_dates(tontine: dict[str, Any], member_id: str) -> int:
     return len(rows)
 
 
-async def enroll_member(tontine: dict[str, Any], member_id: str) -> None:
+async def branches_held(tontine_id: str, member_id: str) -> int:
+    """Existing rows have no `branches` field: they count as one part."""
+    row = await db.tontine_members.find_one({"tontine_id": tontine_id, "member_id": member_id}, {"_id": 0})
+    return max(int((row or {}).get("branches") or 1), 1)
+
+
+async def branches_used(tontine_id: str) -> int:
+    rows = await db.tontine_members.find(
+        {"tontine_id": tontine_id, "status": "active"}, {"_id": 0, "branches": 1}
+    ).to_list(1000)
+    return sum(max(int(r.get("branches") or 1), 1) for r in rows)
+
+
+def branch_capacity(tontine: dict[str, Any]) -> int:
+    return int(tontine.get("total_branches") or tontine.get("member_count") or 0)
+
+
+async def assert_branches_available(tontine: dict[str, Any], requested: int, member_id: str) -> None:
+    """Capacity is counted in branches, never in member headcount."""
+    if requested < 1:
+        raise HTTPException(status_code=422, detail="Le nombre de branches doit être au moins 1")
+    allow_multi = bool(tontine.get("allow_multi_branch"))
+    max_per_member = int(tontine.get("max_branches_per_member") or 1)
+    if not allow_multi and requested > 1:
+        raise HTTPException(status_code=422, detail="Cette tontine n'autorise qu'une seule branche par membre")
+    already = 0
+    if await db.tontine_members.find_one({"tontine_id": tontine["id"], "member_id": member_id}):
+        already = await branches_held(tontine["id"], member_id)
+    if allow_multi and already + requested > max_per_member:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Limite de {max_per_member} branche(s) par membre pour cette tontine",
+        )
+    capacity = branch_capacity(tontine)
+    used = await branches_used(tontine["id"])
+    if capacity and used + requested > capacity:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Il ne reste que {max(capacity - used, 0)} branche(s) disponible(s) sur cette tontine",
+        )
+
+
+async def enroll_member(tontine: dict[str, Any], member_id: str, branches: int = 1) -> None:
     """Add a member to a tontine directly: membership row + schedule + contract."""
     await db.tontine_members.update_one(
         {"tontine_id": tontine["id"], "member_id": member_id},
         {
-            "$set": {"status": "active", "gerance_id": tontine["gerance_id"]},
+            "$set": {"status": "active", "gerance_id": tontine["gerance_id"],
+                     "branches": max(int(branches), 1)},
             "$setOnInsert": {"id": new_id(), "joined_at": now_utc()},
         },
         upsert=True,
     )
-    await generate_due_dates(tontine, member_id)
+    await generate_due_dates(tontine, member_id, branches)
     if not await db.contracts.find_one({"tontine_id": tontine["id"], "member_id": member_id}):
         await db.contracts.insert_one(
             {
@@ -191,10 +237,16 @@ def late_days(due: dict[str, Any], today: str) -> int:
     return (parse_date(today) - parse_date(due["date"])).days
 
 
-def penalty_amount(due: dict[str, Any], today: str, penalty_per_day: int = PENALTY_PER_DAY_DEFAULT) -> int:
-    """One flat penalty per unpaid day once its deadline has passed — it does not compound.
+def penalty_amount(
+    due: dict[str, Any],
+    today: str,
+    penalty_per_day: int = PENALTY_PER_DAY_DEFAULT,
+    grace_days: int = 0,
+) -> int:
+    """One flat penalty per unpaid day once its deadline (plus any grace) has passed.
 
-    Spec reference: 5 jours de retard à 3 150 FCFA => 15 750 FCFA de cotisations
-    + 2 500 FCFA de pénalités (= 5 x 500), not 500 per day per missed day.
+    It does not compound. Spec reference: 5 jours de retard à 3 150 FCFA =>
+    15 750 FCFA de cotisations + 2 500 FCFA de pénalités (= 5 x 500).
+    `grace_days` is the configurable tolerance: 0 = penalty from the day after the due date.
     """
-    return penalty_per_day if late_days(due, today) > 0 else 0
+    return penalty_per_day if late_days(due, today) > grace_days else 0

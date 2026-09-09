@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -5,7 +6,7 @@ import { PublicLayout, StatusPill, Empty } from "@/components/Shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
 import { useMe } from "@/lib/session";
-import { fcfa, type Position, type Tontine } from "@/lib/types";
+import { fcfa, type MemberMethod, type Position, type Tontine } from "@/lib/types";
 
 export function AvailableTontines() {
   const { data, isLoading, isError } = useQuery({
@@ -63,6 +64,7 @@ export function TontineDetail() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data: me } = useMe();
+  const [branches, setBranches] = useState(1);
 
   const tontine = useQuery({
     queryKey: ["tontine", id],
@@ -76,9 +78,15 @@ export function TontineDetail() {
     enabled: Boolean(id),
     retry: false,
   });
+  const options = useQuery({
+    queryKey: ["tontine", id, "payment-options"],
+    queryFn: () => apiGet<MemberMethod[]>(`/tontines/${id}/payment-options`),
+    enabled: Boolean(id),
+    retry: false,
+  });
 
   const join = useMutation({
-    mutationFn: () => apiPost("/memberships/request", { tontine_id: id }),
+    mutationFn: () => apiPost("/memberships/request", { tontine_id: id, branches }),
     onSuccess: () => {
       toast.success("Votre demande d'adhésion a bien été enregistrée ✅");
       qc.invalidateQueries({ queryKey: ["memberships"] });
@@ -91,6 +99,9 @@ export function TontineDetail() {
   });
 
   const t = tontine.data;
+  const maxBranches = t?.allow_multi_branch
+    ? Math.max(1, Math.min(t.max_branches_per_member, t.branches_available || t.max_branches_per_member))
+    : 1;
 
   return (
     <PublicLayout>
@@ -121,6 +132,9 @@ export function TontineDetail() {
                 ["Intervalle entre prises", `${t.interval_days} jours`],
                 ["Bénéficiaires", `${t.beneficiary_count}`],
                 ["Membres", `${t.joined_count}/${t.member_count}`],
+                ["Branches disponibles", `${t.branches_available}/${t.total_branches ?? t.member_count}`],
+                ["Branches par membre", t.allow_multi_branch ? `jusqu'à ${t.max_branches_per_member}` : "1 seule"],
+                ["Pénalité", t.penalty_mode === "branch" ? "par branche" : "par membre"],
                 ["Durée", `${t.duration_days} jours`],
                 ["Début", t.start_date],
                 ["Fin", t.end_date],
@@ -155,10 +169,69 @@ export function TontineDetail() {
             </div>
 
             <div className="mt-10 rounded-2xl border border-primary/25 bg-primary/5 p-5 md:p-6">
+              {(options.data ?? []).length > 0 && (
+                <div className="mb-5">
+                  <p className="text-sm font-medium">Moyens de paiement acceptés pour cette tontine</p>
+                  <div className="mt-2 flex flex-wrap gap-2" data-testid="tontine-payment-options">
+                    {(options.data ?? []).map((m) => (
+                      <span key={m.id} className="rounded-xl border border-border/70 bg-card px-3 py-1.5 text-sm">
+                        {m.icon} {m.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               {me ? (
-                <Button size="lg" className="w-full sm:w-auto" onClick={() => join.mutate()} disabled={join.isPending} data-testid="join-tontine-button">
-                  {join.isPending ? "Envoi…" : "Adhérer à cette tontine"}
-                </Button>
+                <>
+                  {t.allow_multi_branch && (
+                    <div className="mb-4" data-testid="branch-selector">
+                      <p className="text-sm font-medium">Choisissez le nombre de branches</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {Array.from({ length: maxBranches }, (_, i) => i + 1).map((n) => (
+                          <Button
+                            key={n}
+                            size="sm"
+                            variant={branches === n ? "default" : "outline"}
+                            onClick={() => setBranches(n)}
+                            data-testid={`branch-option-${n}`}
+                          >
+                            {n} branche{n > 1 ? "s" : ""}
+                          </Button>
+                        ))}
+                      </div>
+                      <div className="mt-3 space-y-1 rounded-xl bg-card p-3 text-sm">
+                        <p>Nombre de branches : <strong>{branches}</strong></p>
+                        <p>Cotisation par branche : <strong>{fcfa(t.daily_amount)}</strong> / jour</p>
+                        <p>
+                          Votre cotisation totale :{" "}
+                          <strong className="text-primary" data-testid="branch-total-daily">
+                            {fcfa(t.daily_amount * branches)}
+                          </strong>{" "}
+                          / jour
+                        </p>
+                        <p className="text-muted-foreground">
+                          Branches disponibles : {t.branches_available} / {t.total_branches ?? t.member_count} ·
+                          maximum {t.max_branches_per_member} par membre
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  <Button
+                    size="lg"
+                    className="w-full sm:w-auto"
+                    onClick={() => join.mutate()}
+                    disabled={join.isPending || t.branches_available === 0}
+                    data-testid="join-tontine-button"
+                  >
+                    {join.isPending
+                      ? "Envoi…"
+                      : t.branches_available === 0
+                        ? "Plus de place disponible"
+                        : t.allow_multi_branch
+                          ? `Confirmer ma demande (${branches} branche${branches > 1 ? "s" : ""})`
+                          : "Adhérer à cette tontine"}
+                  </Button>
+                </>
               ) : (
                 <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
                   <p className="text-sm text-muted-foreground">Créez votre compte pour envoyer une demande d'adhésion.</p>

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { PublicLayout, Stat, StatusPill, Empty, BottomBar, scrollTabs } from "@/components/Shell";
+import SettingsPanel from "@/components/SettingsPanel";
 import { LayoutDashboard, Landmark, UserPlus, Wallet } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,6 +56,11 @@ function CreateTontineForm() {
     deadline_time: "18:00",
     penalty_per_day: 500,
     is_existing: false,
+    allow_multi_branch: false,
+    max_branches_per_member: 1,
+    total_branches: null as number | null,
+    penalty_mode: "member",
+    turn_mode: "manual",
   });
   const num = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setF({ ...f, [k]: Number(e.target.value) });
@@ -111,6 +117,67 @@ function CreateTontineForm() {
       <div className="flex items-center gap-2 sm:col-span-2">
         <Checkbox checked={f.is_existing} onCheckedChange={(v) => setF({ ...f, is_existing: Boolean(v) })} data-testid="tontine-existing-checkbox" />
         <span className="text-sm">Tontine existante déjà en cours (l'historique sera saisi manuellement)</span>
+      </div>
+      <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/30 p-4 sm:col-span-2">
+        <p className="text-sm font-medium">Branches (parts) par membre</p>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={f.allow_multi_branch}
+            onCheckedChange={(v) => setF({ ...f, allow_multi_branch: Boolean(v), max_branches_per_member: v ? 3 : 1 })}
+            data-testid="tontine-multibranch-checkbox"
+          />
+          Autoriser plusieurs branches par membre
+        </label>
+        {f.allow_multi_branch && (
+          <div className="space-y-2">
+            <Label htmlFor="t-maxbranch">Nombre maximum de branches par membre</Label>
+            <Input
+              id="t-maxbranch"
+              type="number"
+              min={1}
+              value={String(f.max_branches_per_member)}
+              onChange={(e) => setF({ ...f, max_branches_per_member: Number(e.target.value) })}
+              data-testid="tontine-maxbranches-input"
+            />
+          </div>
+        )}
+        <div className="space-y-2">
+          <Label htmlFor="t-totalbranch">Nombre total de branches disponibles (vide = nombre de membres)</Label>
+          <Input
+            id="t-totalbranch"
+            type="number"
+            min={1}
+            value={f.total_branches === null ? "" : String(f.total_branches)}
+            onChange={(e) => setF({ ...f, total_branches: e.target.value ? Number(e.target.value) : null })}
+            data-testid="tontine-totalbranches-input"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="t-penalmode">Mode de calcul de la pénalité</Label>
+          <select
+            id="t-penalmode"
+            className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm"
+            value={f.penalty_mode}
+            onChange={(e) => setF({ ...f, penalty_mode: e.target.value })}
+            data-testid="tontine-penaltymode-select"
+          >
+            <option value="member">Par membre</option>
+            <option value="branch">Par branche</option>
+          </select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="t-turnmode">Gestion des tours / branches</Label>
+          <select
+            id="t-turnmode"
+            className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm"
+            value={f.turn_mode}
+            onChange={(e) => setF({ ...f, turn_mode: e.target.value })}
+            data-testid="tontine-turnmode-select"
+          >
+            <option value="manual">Manuelle par le gérant</option>
+            <option value="auto">Automatique</option>
+          </select>
+        </div>
       </div>
       <Button type="submit" className="sm:col-span-2" disabled={create.isPending} data-testid="tontine-create-button">
         {create.isPending ? "Création…" : "Créer la tontine"}
@@ -175,6 +242,8 @@ function TontineCard({ t }: { t: Tontine }) {
       </div>
       <p className="mt-3 text-sm text-muted-foreground">
         {fcfa(t.daily_amount)} / jour · prise {fcfa(t.payout_amount)} tous les {t.interval_days} jours · {t.joined_count}/{t.member_count} membres
+        {" · "}{t.branches_used}/{t.total_branches ?? t.member_count} branches
+        {t.allow_multi_branch ? ` · jusqu'à ${t.max_branches_per_member} branches/membre` : " · 1 branche/membre"}
       </p>
       <div className="mt-4 flex gap-2">
         <Button size="sm" variant="outline" onClick={() => setOpen((o) => !o)} data-testid={`tontine-positions-toggle-${t.id}`}>
@@ -903,6 +972,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
             <TabsTrigger value="prises" data-testid="tab-prises">Prises</TabsTrigger>
             <TabsTrigger value="notifications" data-testid="tab-notifications">Notifications</TabsTrigger>
             <TabsTrigger value="audit" data-testid="tab-audit">Historique &amp; audit</TabsTrigger>
+            <TabsTrigger value="parametres" data-testid="tab-parametres">⚙️ Paramètres</TabsTrigger>
           </TabsList>
 
           <TabsContent value="dashboard" className="mt-6 space-y-6">
@@ -992,7 +1062,9 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                   <span className="font-medium">{r.member_name}</span>
                   <StatusPill value={r.status} />
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">{r.tontine_name} · {r.gerance_name}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {r.tontine_name} · {r.gerance_name} · {r.branches} branche(s) · {fcfa(r.daily_total)}/jour
+                </p>
                 {r.status === "pending" && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button size="sm" className="flex-1 sm:flex-none" onClick={() => decideRequest.mutate({ id: r.id, action: "accept" })} data-testid={`request-accept-${r.id}`}>Accepter</Button>
@@ -1186,6 +1258,10 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
               </div>
             ))}
             {(notifications.data ?? []).length === 0 && <Empty text="Aucune notification." testId="staff-notifications-empty" />}
+          </TabsContent>
+
+          <TabsContent value="parametres" className="mt-6">
+            <SettingsPanel tontines={myTontines.data ?? []} isAdmin={isAdmin} />
           </TabsContent>
 
           <TabsContent value="audit" className="mt-6 space-y-2" data-testid="audit-list">

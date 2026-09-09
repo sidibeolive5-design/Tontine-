@@ -5,8 +5,12 @@ from pydantic import BaseModel, Field
 
 from lib.auth import current_user, ensure_permission, optional_user, require_staff
 from lib.core import (
+    assert_branches_available,
     assert_gerance_access,
     audit,
+    branch_capacity,
+    branches_held,
+    branches_used,
     generate_due_dates,
     get_tontine,
     new_id,
@@ -37,6 +41,13 @@ class TontineInput(BaseModel):
     timezone: str = "Africa/Abidjan"
     status: str = "open"
     is_existing: bool = False
+    grace_days: Optional[int] = None
+    total_branches: Optional[int] = None
+    allow_multi_branch: bool = False
+    max_branches_per_member: int = 1
+    penalty_mode: str = "member"   # member | branch
+    turn_mode: str = "manual"      # manual | auto
+    payment_method_ids: list[str] = []
 
 
 class TontineOut(BaseModel):
@@ -60,6 +71,15 @@ class TontineOut(BaseModel):
     is_existing: bool
     created_by: str
     joined_count: int = 0
+    grace_days: Optional[int] = None
+    total_branches: Optional[int] = None
+    allow_multi_branch: bool = False
+    max_branches_per_member: int = 1
+    penalty_mode: str = "member"
+    turn_mode: str = "manual"
+    payment_method_ids: list[str] = []
+    branches_used: int = 0
+    branches_available: int = 0
 
 
 class PositionOut(BaseModel):
@@ -76,7 +96,15 @@ class PositionOut(BaseModel):
 async def _enrich(t: dict[str, Any]) -> TontineOut:
     gerance = await db.gerances.find_one({"id": t["gerance_id"]}, {"_id": 0})
     joined = await db.tontine_members.count_documents({"tontine_id": t["id"], "status": "active"})
-    return TontineOut(**t, gerance_name=gerance["name"] if gerance else "—", joined_count=joined)
+    used = await branches_used(t["id"])
+    capacity = branch_capacity(t)
+    return TontineOut(
+        **t,
+        gerance_name=gerance["name"] if gerance else "—",
+        joined_count=joined,
+        branches_used=used,
+        branches_available=max(capacity - used, 0),
+    )
 
 
 @router.post("/tontines", response_model=TontineOut)
@@ -99,6 +127,14 @@ async def create_tontine(payload: TontineInput, user: dict[str, Any] = Depends(r
         "created_at": now_utc(),
         **payload.model_dump(),
     }
+    if not doc.get("total_branches"):
+        doc["total_branches"] = payload.member_count
+    if not payload.allow_multi_branch:
+        doc["max_branches_per_member"] = 1
+    if doc["penalty_mode"] not in ("member", "branch"):
+        raise HTTPException(status_code=422, detail="Mode de pénalité invalide")
+    if doc["turn_mode"] not in ("manual", "auto"):
+        raise HTTPException(status_code=422, detail="Mode de gestion des tours invalide")
     await db.tontines.insert_one(doc)
     positions = [
         {
@@ -151,7 +187,8 @@ async def update_tontine(tontine_id: str, body: dict[str, Any], user: dict[str, 
     tontine = await get_tontine(tontine_id)
     assert_gerance_access(user, tontine["gerance_id"])
     allowed = {"name", "description", "status", "deadline_time", "penalty_per_day", "description", "start_date",
-               "interval_days", "duration_days"}
+               "interval_days", "duration_days", "grace_days", "total_branches", "allow_multi_branch",
+               "max_branches_per_member", "penalty_mode", "turn_mode"}
     updates = {k: v for k, v in body.items() if k in allowed}
     if not updates:
         raise HTTPException(status_code=422, detail="Rien à mettre à jour")
@@ -249,6 +286,8 @@ class MembershipRequestOut(BaseModel):
     member_id: str
     member_name: str
     member_phone: str
+    branches: int = 1
+    daily_total: int = 0
     status: str
     created_at: Any
     decided_at: Optional[Any] = None
@@ -258,8 +297,11 @@ async def _request_out(r: dict[str, Any]) -> MembershipRequestOut:
     t = await db.tontines.find_one({"id": r["tontine_id"]}, {"_id": 0})
     g = await db.gerances.find_one({"id": r["gerance_id"]}, {"_id": 0})
     u = await db.users.find_one({"id": r["member_id"]}, {"_id": 0})
+    branches = max(int(r.get("branches") or 1), 1)
     return MembershipRequestOut(
-        **r,
+        **{k: v for k, v in r.items() if k != "branches"},
+        branches=branches,
+        daily_total=int(t["daily_amount"]) * branches if t else 0,
         tontine_name=t["name"] if t else "—",
         gerance_name=g["name"] if g else "—",
         member_name=f"{u['first_name']} {u['last_name']}" if u else "—",
@@ -269,6 +311,7 @@ async def _request_out(r: dict[str, Any]) -> MembershipRequestOut:
 
 class JoinInput(BaseModel):
     tontine_id: str
+    branches: int = 1
 
 
 @router.post("/memberships/request", response_model=MembershipRequestOut)
@@ -281,11 +324,13 @@ async def request_membership(payload: JoinInput, user: dict[str, Any] = Depends(
     )
     if existing:
         raise HTTPException(status_code=409, detail="Vous avez déjà une demande en cours pour cette tontine")
+    await assert_branches_available(tontine, int(payload.branches), user["id"])
     doc = {
         "id": new_id(),
         "tontine_id": tontine["id"],
         "gerance_id": tontine["gerance_id"],
         "member_id": user["id"],
+        "branches": max(int(payload.branches), 1),
         "status": "pending",
         "created_at": now_utc(),
         "decided_at": None,
@@ -341,20 +386,24 @@ async def decide_request(request_id: str, payload: DecideInput, user: dict[str, 
     if payload.action not in mapping:
         raise HTTPException(status_code=422, detail="Action invalide")
     status = mapping[payload.action]
+    tontine = await get_tontine(req["tontine_id"])
+    requested = max(int(req.get("branches") or 1), 1)
+    if status == "accepted":
+        # Re-check capacity at decision time: another manager may have filled the branches.
+        await assert_branches_available(tontine, requested, req["member_id"])
     await db.membership_requests.update_one(
         {"id": request_id}, {"$set": {"status": status, "decided_at": now_utc()}}
     )
-    tontine = await get_tontine(req["tontine_id"])
     if status == "accepted":
         await db.tontine_members.update_one(
             {"tontine_id": req["tontine_id"], "member_id": req["member_id"]},
             {
-                "$set": {"status": "active", "gerance_id": req["gerance_id"]},
+                "$set": {"status": "active", "gerance_id": req["gerance_id"], "branches": requested},
                 "$setOnInsert": {"id": new_id(), "joined_at": now_utc()},
             },
             upsert=True,
         )
-        await generate_due_dates(tontine, req["member_id"])
+        await generate_due_dates(tontine, req["member_id"], requested)
         if not await db.contracts.find_one({"tontine_id": tontine["id"], "member_id": req["member_id"]}):
             await db.contracts.insert_one(
                 {
@@ -464,6 +513,8 @@ async def sign_contract(contract_id: str, user: dict[str, Any] = Depends(current
 class MyTontineOut(BaseModel):
     tontine: TontineOut
     joined_at: Any
+    branches: int = 1
+    daily_total: int = 0
     position_index: Optional[int] = None
     payout_date: Optional[str] = None
     contract_status: Optional[str] = None
@@ -483,6 +534,8 @@ async def my_tontines(user: dict[str, Any] = Depends(current_user)):
             MyTontineOut(
                 tontine=await _enrich(t),
                 joined_at=r["joined_at"],
+                branches=max(int(r.get("branches") or 1), 1),
+                daily_total=int(t["daily_amount"]) * max(int(r.get("branches") or 1), 1),
                 position_index=pos["index"] if pos else None,
                 payout_date=pos["payout_date"] if pos else None,
                 contract_status=contract["status"] if contract else None,
@@ -505,6 +558,7 @@ async def tontine_members(tontine_id: str, user: dict[str, Any] = Depends(requir
                 "name": f"{u['first_name']} {u['last_name']}" if u else "—",
                 "phone": u["phone"] if u else "—",
                 "status": r["status"],
+                "branches": max(int(r.get("branches") or 1), 1),
                 "joined_at": r["joined_at"],
             }
         )

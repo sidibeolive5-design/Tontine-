@@ -78,6 +78,15 @@ export interface Tontine {
   is_existing: boolean;
   created_by: string;
   joined_count: number;
+  grace_days: number | null;
+  total_branches: number | null;
+  allow_multi_branch: boolean;
+  max_branches_per_member: number;
+  penalty_mode: string;
+  turn_mode: string;
+  payment_method_ids: string[];
+  branches_used: number;
+  branches_available: number;
 }
 
 export interface Position {
@@ -100,6 +109,8 @@ export interface MembershipRequest {
   member_id: string;
   member_name: string;
   member_phone: string;
+  branches: number;
+  daily_total: number;
   status: string;
   created_at: string;
   decided_at: string | null;
@@ -124,6 +135,8 @@ export interface Contract {
 export interface MyTontine {
   tontine: Tontine;
   joined_at: string;
+  branches: number;
+  daily_total: number;
   position_index: number | null;
   payout_date: string | null;
   contract_status: string | null;
@@ -176,6 +189,10 @@ export interface Payment {
   penalty_amount: number;
   days: string[];
   method: string;
+  method_name: string;
+  method_number: string;
+  reference: string;
+  receipt_number: string | null;
   status: string;
   proof_filename: string;
   created_at: string;
@@ -264,6 +281,7 @@ export interface TontineMemberRow {
   name: string;
   phone: string;
   status: string;
+  branches: number;
   joined_at: string;
 }
 
@@ -292,6 +310,53 @@ export interface PublicInvitation {
   gerance_name: string;
   tontine_name: string | null;
   status: string;
+}
+
+export interface PlatformSettings {
+  name: string;
+  slogan: string;
+  logo: string | null;
+  whatsapp: string;
+  phone: string;
+  email: string;
+  address: string;
+  currency: string;
+  language: string;
+  contact_note: string;
+}
+
+export interface FinanceRules {
+  deadline_time: string;
+  penalty_per_day: number;
+  grace_days: number;
+  replacement_after_days: number;
+  allow_advance: boolean;
+  advance_max_days: number;
+  fees_note: string;
+  refund_note: string;
+}
+
+export interface GeranceMethod {
+  id: string;
+  gerance_id: string;
+  name: string;
+  code: string;
+  number: string;
+  holder: string;
+  icon: string;
+  active: boolean;
+  instructions: string;
+  sort_order: number;
+}
+
+export interface MemberMethod {
+  id: string;
+  name: string;
+  code: string;
+  number: string;
+  holder: string;
+  icon: string;
+  instructions: string;
 }
 
 export interface ArrearRow {

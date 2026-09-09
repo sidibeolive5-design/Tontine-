@@ -17,6 +17,7 @@ import {
   label,
   type Contract,
   type DueDate,
+  type MemberMethod,
   type MembershipRequest,
   type MyTontine,
   type Notification,
@@ -108,25 +109,38 @@ function PayDialogSection({ dues, methods }: { dues: DueDate[]; methods?: Paymen
   const qc = useQueryClient();
   const [selected, setSelected] = useState<string[]>([]);
   const [proof, setProof] = useState<{ data: string; name: string } | null>(null);
+  const [method, setMethod] = useState("");
+  const [reference, setReference] = useState("");
 
   const payable = dues.filter((d) => d.status === "pending");
   const chosen = payable.filter((d) => selected.includes(d.id));
   const total = chosen.reduce((s, d) => s + d.amount + d.penalty, 0);
   const tontineId = chosen[0]?.tontine_id;
 
+  const options = useQuery({
+    queryKey: ["tontine", tontineId, "payment-options"],
+    queryFn: () => apiGet<MemberMethod[]>(`/tontines/${tontineId}/payment-options`),
+    enabled: Boolean(tontineId),
+    retry: false,
+  });
+  const geranceMethods = options.data ?? [];
+  const activeMethod = geranceMethods.find((m) => m.code === method) ?? geranceMethods[0];
+
   const submit = useMutation({
     mutationFn: () =>
       apiPost<Payment>("/payments", {
         tontine_id: tontineId,
         due_date_ids: selected,
-        method: "wave",
+        method: activeMethod?.code ?? "wave",
         proof_image: proof?.data,
         proof_filename: proof?.name,
+        reference: reference.trim() || undefined,
       }),
     onSuccess: () => {
       toast.success("Preuve envoyée — en attente de vérification");
       setSelected([]);
       setProof(null);
+      setReference("");
       qc.invalidateQueries();
     },
     onError: (e) => toast.error(detail(e, "Envoi impossible")),
@@ -187,21 +201,55 @@ function PayDialogSection({ dues, methods }: { dues: DueDate[]; methods?: Paymen
         </div>
 
         <div className="mt-5 space-y-2">
-          {(methods?.methods ?? []).map((m) => (
-            <div
-              key={m.code}
-              className={`flex items-center justify-between rounded-xl border px-3 py-2 text-sm ${m.available ? "border-primary/40 bg-card" : "border-border/60 opacity-60"}`}
-              data-testid={`payment-method-${m.code}`}
-            >
-              <span>{m.emoji} {m.label}</span>
-              <span className="text-xs">{m.available ? "Disponible" : "Bientôt disponible"}</span>
-            </div>
-          ))}
+          {geranceMethods.length > 0 ? (
+            geranceMethods.map((m) => {
+              const chosenMethod = (activeMethod?.code ?? "") === m.code;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => setMethod(m.code)}
+                  className={`w-full rounded-xl border px-3 py-2 text-left text-sm transition-colors duration-200 ${chosenMethod ? "border-primary bg-card" : "border-border/60 bg-card/60"}`}
+                  data-testid={`payment-method-${m.code}`}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span>{m.icon} {m.name}</span>
+                    {chosenMethod && <span className="text-xs text-primary">Sélectionné</span>}
+                  </span>
+                  {chosenMethod && (
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      {m.number ? `Numéro : ${m.number}` : "Numéro non renseigné"}
+                      {m.holder ? ` · ${m.holder}` : ""}
+                      {m.instructions ? ` — ${m.instructions}` : ""}
+                    </span>
+                  )}
+                </button>
+              );
+            })
+          ) : (
+            (methods?.methods ?? []).map((m) => (
+              <div
+                key={m.code}
+                className={`flex items-center justify-between rounded-xl border px-3 py-2 text-sm ${m.available ? "border-primary/40 bg-card" : "border-border/60 opacity-60"}`}
+                data-testid={`payment-method-${m.code}`}
+              >
+                <span>{m.emoji} {m.label}</span>
+                <span className="text-xs">{m.available ? "Disponible" : "Bientôt disponible"}</span>
+              </div>
+            ))
+          )}
         </div>
 
         <div className="mt-4 rounded-xl bg-card p-3 text-sm">
-          <p className="text-muted-foreground">Numéro Wave</p>
-          <p className="font-medium" data-testid="wave-number">{methods?.wave_number ?? "—"}</p>
+          <p className="text-muted-foreground">Numéro à créditer</p>
+          <p className="font-medium" data-testid="wave-number">
+            {activeMethod?.number || methods?.wave_number || "—"}
+          </p>
+        </div>
+
+        <div className="mt-4 space-y-2">
+          <Label htmlFor="pay-ref">Référence de la transaction (optionnel)</Label>
+          <Input id="pay-ref" value={reference} onChange={(e) => setReference(e.target.value)} data-testid="payment-reference-input" />
         </div>
 
         <div className="mt-4 space-y-2">
@@ -356,7 +404,10 @@ export default function MemberSpace() {
                   <StatusPill value={m.tontine.status} />
                 </div>
                 <p className="text-xs uppercase tracking-wider text-muted-foreground">{m.tontine.gerance_name}</p>
-                <p className="mt-3 text-sm">Cotisation : {fcfa(m.tontine.daily_amount)} / jour</p>
+                <p className="mt-3 text-sm">
+                  Branches : <strong>{m.branches}</strong> · cotisation {fcfa(m.daily_total)} / jour
+                  {m.branches > 1 && <span className="text-muted-foreground"> ({fcfa(m.tontine.daily_amount)} × {m.branches})</span>}
+                </p>
                 <p className="text-sm">Ma position : {m.position_index ?? "non attribuée"} {m.payout_date ? `— prise le ${m.payout_date}` : ""}</p>
                 <p className="text-sm text-muted-foreground">Contrat : {m.contract_status ? label(m.contract_status) : "—"}</p>
               </div>
@@ -369,6 +420,7 @@ export default function MemberSpace() {
               <div key={r.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-card px-4 py-3 text-sm">
                 <span className="font-medium">{r.tontine_name}</span>
                 <span className="text-muted-foreground">{r.gerance_name}</span>
+                {r.branches > 1 && <span className="text-xs text-primary">{r.branches} branches · {fcfa(r.daily_total)}/jour</span>}
                 <span className="ml-auto"><StatusPill value={r.status} /></span>
               </div>
             ))}
@@ -384,7 +436,8 @@ export default function MemberSpace() {
               <div key={p.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-card px-4 py-3 text-sm">
                 <span className="font-medium">{fcfa(p.amount)}</span>
                 <span className="text-muted-foreground">{p.tontine_name}</span>
-                <span className="text-xs text-muted-foreground">{p.days.length} jour(s)</span>
+                <span className="text-xs text-muted-foreground">{p.days.length} jour(s){p.method_name ? ` · ${p.method_name}` : ""}</span>
+                {p.receipt_number && <span className="text-xs text-primary" data-testid={`receipt-${p.id}`}>Reçu {p.receipt_number}</span>}
                 {p.penalty_amount > 0 && <span className="text-xs text-red-700">dont {fcfa(p.penalty_amount)} de pénalités</span>}
                 <span className="ml-auto"><StatusPill value={p.status} /></span>
               </div>

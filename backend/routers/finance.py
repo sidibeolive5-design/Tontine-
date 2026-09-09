@@ -66,12 +66,24 @@ class SummaryOut(BaseModel):
     next_due_date: Optional[str] = None
 
 
+async def _grace_for(tontine: dict[str, Any]) -> int:
+    """Tontine override first, then the gérance rule, then 0 (penalty from day after)."""
+    if tontine.get("grace_days") is not None:
+        return int(tontine["grace_days"])
+    from routers.settings import finance_rules_for
+
+    rules = await finance_rules_for(tontine["gerance_id"])
+    return int(rules.get("grace_days", 0))
+
+
 async def _due_rows(query: dict[str, Any]) -> list[DueDateOut]:
     rows = await db.contribution_due_dates.find(query, {"_id": 0}).sort("date", 1).to_list(20000)
     today = today_iso()
     names: dict[str, str] = {}
     tnames: dict[str, str] = {}
     tpenalty: dict[str, int] = {}
+    tgrace: dict[str, int] = {}
+    tmode: dict[str, str] = {}
     out = []
     for r in rows:
         if r["member_id"] not in names:
@@ -81,6 +93,11 @@ async def _due_rows(query: dict[str, Any]) -> list[DueDateOut]:
             t = await db.tontines.find_one({"id": r["tontine_id"]}, {"_id": 0})
             tnames[r["tontine_id"]] = t["name"] if t else "—"
             tpenalty[r["tontine_id"]] = int(t.get("penalty_per_day", 500)) if t else 500
+            tgrace[r["tontine_id"]] = await _grace_for(t) if t else 0
+            tmode[r["tontine_id"]] = (t or {}).get("penalty_mode", "member")
+        base = penalty_amount(r, today, tpenalty[r["tontine_id"]], tgrace[r["tontine_id"]])
+        # « Par branche » multiplies the flat penalty by the parts held (rows default to 1).
+        multiplier = max(int(r.get("branches") or 1), 1) if tmode[r["tontine_id"]] == "branch" else 1
         out.append(
             DueDateOut(
                 **r,
@@ -88,7 +105,7 @@ async def _due_rows(query: dict[str, Any]) -> list[DueDateOut]:
                 member_name=names[r["member_id"]],
                 display_status=effective_status(r, today),
                 late_days=late_days(r, today),
-                penalty=penalty_amount(r, today, tpenalty[r["tontine_id"]]),
+                penalty=base * multiplier,
             )
         )
     return out
@@ -323,8 +340,9 @@ class PaymentInput(BaseModel):
     tontine_id: str
     due_date_ids: list[str] = Field(min_length=1)
     method: str = "wave"
-    proof_image: str = Field(min_length=10)  # base64 data URL of the Wave receipt
+    proof_image: str = Field(min_length=10)  # base64 data URL of the payment receipt
     proof_filename: str = "preuve.jpg"
+    reference: Optional[str] = None
 
 
 class PaymentOut(BaseModel):
@@ -340,6 +358,10 @@ class PaymentOut(BaseModel):
     penalty_amount: int
     days: list[str]
     method: str
+    method_name: str = ""
+    method_number: str = ""
+    reference: str = ""
+    receipt_number: Optional[str] = None
     status: str
     proof_filename: str
     created_at: Any
@@ -369,10 +391,24 @@ async def payment_methods():
 
 @router.post("/payments", response_model=PaymentOut)
 async def submit_payment(payload: PaymentInput, user: dict[str, Any] = Depends(current_user)):
-    method = next((m for m in PAYMENT_METHODS if m["code"] == payload.method), None)
-    if not method or not method["available"]:
-        raise HTTPException(status_code=400, detail="Ce moyen de paiement n'est pas encore disponible")
     tontine = await get_tontine(payload.tontine_id)
+    # Methods come from the gérance settings; the legacy Wave entry is the fallback
+    # so tontines created before the settings centre keep working unchanged.
+    query: dict[str, Any] = {"gerance_id": tontine["gerance_id"], "active": True}
+    selected = tontine.get("payment_method_ids")
+    if selected:
+        query["id"] = {"$in": selected}
+    configured = await db.payment_methods.find(query, {"_id": 0}).to_list(100)
+    chosen_method: Optional[dict[str, Any]] = None
+    if configured:
+        chosen_method = next((m for m in configured if m["code"] == payload.method.lower()), None)
+        if not chosen_method:
+            raise HTTPException(status_code=400, detail="Ce moyen de paiement n'est pas disponible pour cette tontine")
+    else:
+        legacy = next((m for m in PAYMENT_METHODS if m["code"] == payload.method), None)
+        if not legacy or not legacy["available"]:
+            raise HTTPException(status_code=400, detail="Ce moyen de paiement n'est pas encore disponible")
+        chosen_method = {"name": legacy["label"], "code": legacy["code"], "number": WAVE_NUMBER}
     dues = await db.contribution_due_dates.find(
         {"id": {"$in": payload.due_date_ids}, "member_id": user["id"], "tontine_id": tontine["id"]}, {"_id": 0}
     ).to_list(500)
@@ -381,10 +417,14 @@ async def submit_payment(payload: PaymentInput, user: dict[str, Any] = Depends(c
     if any(d["status"] in ("paid", "processing") for d in dues):
         raise HTTPException(status_code=409, detail="Certaines échéances sont déjà payées ou en cours de vérification")
     today = today_iso()
+    grace = await _grace_for(tontine)
+    per_branch = tontine.get("penalty_mode") == "branch"
     # Amount is computed server-side: the member never types it.
     contribution_amount = sum(d["amount"] for d in dues)
     penalty_total = sum(
-        penalty_amount(d, today, int(tontine.get("penalty_per_day", 500))) for d in dues
+        penalty_amount(d, today, int(tontine.get("penalty_per_day", 500)), grace)
+        * (max(int(d.get("branches") or 1), 1) if per_branch else 1)
+        for d in dues
     )
     payment = {
         "id": new_id(),
@@ -397,9 +437,14 @@ async def submit_payment(payload: PaymentInput, user: dict[str, Any] = Depends(c
         "days": sorted(d["date"] for d in dues),
         "due_date_ids": payload.due_date_ids,
         "method": payload.method,
-        "status": "pending",  # never auto-confirmed: a human verifies the Wave receipt
+        # Snapshot so a deleted/renamed method never rewrites payment history.
+        "method_name": chosen_method["name"],
+        "method_number": chosen_method.get("number", ""),
+        "reference": payload.reference or "",
+        "status": "pending",  # never auto-confirmed: a human verifies the receipt
         "proof_image": payload.proof_image,
         "proof_filename": payload.proof_filename,
+        "receipt_number": None,
         "created_at": now_utc(),
         "decided_at": None,
         "decided_by": None,
@@ -473,9 +518,15 @@ async def decide_payment(payment_id: str, payload: DecidePayment, user: dict[str
         raise HTTPException(status_code=409, detail="Ce paiement a déjà été traité")
     tontine = await get_tontine(p["tontine_id"])
     if payload.action == "validate":
+        year = now_utc().year
+        seq = await db.payments.count_documents(
+            {"gerance_id": p["gerance_id"], "status": "validated"}
+        ) + 1
+        receipt_number = f"ANV-{year}-{seq:05d}"
         await db.payments.update_one(
             {"id": payment_id},
-            {"$set": {"status": "validated", "decided_at": now_utc(), "decided_by": user["id"]}},
+            {"$set": {"status": "validated", "decided_at": now_utc(), "decided_by": user["id"],
+                      "receipt_number": receipt_number}},
         )
         await db.contribution_due_dates.update_many(
             {"id": {"$in": p["due_date_ids"]}},

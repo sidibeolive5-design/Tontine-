@@ -127,6 +127,43 @@ l'arrivée sur la plateforme** pour une position attribuée — date réelle, mo
 (409) et une date mal formée (422). L'interface affiche « Historique enregistré par l'… » sur la
 prise, pour ne jamais la confondre avec une confirmation du jour.
 
+## Centre de paramètres (⚙️ Paramètres)
+- `platform_settings` (doc unique `id="platform"`) : nom, slogan, logo (base64), WhatsApp, téléphone,
+  email, adresse, devise, langue, contact. `GET /api/settings/platform` (lecture ouverte),
+  `PUT` **réservé à l'administrateur** (403 pour un gérant).
+- `finance_rules` (une par gérance) : heure limite, pénalité/jour, **jours de tolérance**,
+  délai de remplacement, paiement anticipé + plafond, frais, remboursement.
+  `GET/PUT /api/settings/finance` — un gérant est toujours épinglé à sa gérance.
+  Chaque tontine peut surcharger `deadline_time`, `penalty_per_day`, `grace_days`, `penalty_mode`.
+- Tout est lu en base avec valeurs par défaut de repli : les tontines créées avant le centre de
+  paramètres continuent de fonctionner sans migration.
+
+## Moyens de paiement (par gérance, puis par tontine)
+`payment_methods` : {gerance_id, name, code, number, holder, icon, active, instructions, sort_order}.
+CRUD `/api/payment-methods/manage` (+ `PATCH`/`DELETE` cloisonnés). Sélection par tontine via
+`PUT /api/tontines/{id}/payment-methods` ; le membre lit
+`GET /api/tontines/{id}/payment-options` (actifs de la gérance ∩ sélection de la tontine ;
+aucune sélection = tous les actifs). Si aucune méthode n'est configurée, repli sur l'entrée Wave
+historique. Le paiement stocke un **instantané** `method_name` / `method_number` : supprimer ou
+renommer un moyen ne réécrit jamais l'historique. Un moyen désactivé est refusé (400) pour un
+nouveau paiement.
+
+## Branches (parts) — multi-tontines et multi-parts
+- Un compte = plusieurs adhésions indépendantes ; chaque adhésion porte un nombre de **branches**.
+- Tontine : `allow_multi_branch`, `max_branches_per_member`, `total_branches` (capacité comptée en
+  branches, défaut = `member_count`), `penalty_mode` (`member` | `branch`), `turn_mode`
+  (`manual` | `auto`).
+- `membership_requests.branches` → le gérant voit « 2 branches · 2 200 FCFA/jour » avant d'accepter.
+- `assert_branches_available()` bloque : plusieurs branches sur une tontine mono (422), dépassement
+  du maximum par membre (422), capacité insuffisante (409). Re-contrôlée **à l'acceptation**.
+- `generate_due_dates(tontine, member, branches)` : `amount = daily_amount × branches`, et la ligne
+  garde `branches` pour le mode de pénalité « par branche ». Les documents antérieurs sans
+  `branches` comptent pour 1 part — aucune migration nécessaire.
+
+## Reçu de paiement
+À la validation, `receipt_number = ANV-<année>-<séquence par gérance>` est attribué et affiché
+côté membre et côté gérant, avec le moyen de paiement, la référence saisie et le montant.
+
 ## Routes frontend
 `/`, `/tontines-disponibles`, `/details-tontine?id=`, `/comment-ca-marche`, `/regles`, `/a-propos`,
 `/conditions-utilisation`, `/politique-confidentialite`, `/connexion`, `/creer-mon-compte`,
