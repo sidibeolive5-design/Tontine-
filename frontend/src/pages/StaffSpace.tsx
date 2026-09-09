@@ -17,6 +17,7 @@ import {
   fcfa,
   label,
   PERMISSION_LABELS,
+  type ArrearRow,
   type AuditRow,
   type DueDate,
   type Gerance,
@@ -699,6 +700,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
   const dues = useQuery({ queryKey: ["due-dates"], queryFn: () => apiGet<DueDate[]>("/due-dates"), retry: false });
   const payouts = useQuery({ queryKey: ["payouts"], queryFn: () => apiGet<Payout[]>("/payouts"), retry: false });
   const audits = useQuery({ queryKey: ["audit"], queryFn: () => apiGet<AuditRow[]>("/audit"), retry: false });
+  const arrears = useQuery({ queryKey: ["arrears"], queryFn: () => apiGet<ArrearRow[]>("/arrears"), retry: false });
   const notifications = useQuery({ queryKey: ["notifications"], queryFn: () => apiGet<Notification[]>("/notifications"), retry: false });
 
   const decideRequest = useMutation({
@@ -763,6 +765,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
             <TabsTrigger value="demandes" data-testid="tab-demandes">Demandes d'adhésion</TabsTrigger>
             <TabsTrigger value="paiements" data-testid="tab-paiements">Paiements</TabsTrigger>
             <TabsTrigger value="cotisations" data-testid="tab-cotisations">Cotisations</TabsTrigger>
+            <TabsTrigger value="retards" data-testid="tab-retards">Retards</TabsTrigger>
             <TabsTrigger value="prises" data-testid="tab-prises">Prises</TabsTrigger>
             <TabsTrigger value="notifications" data-testid="tab-notifications">Notifications</TabsTrigger>
             <TabsTrigger value="audit" data-testid="tab-audit">Historique &amp; audit</TabsTrigger>
@@ -933,6 +936,60 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                 text={(dues.data ?? []).length === 0 ? "Aucune échéance enregistrée." : "Aucune échéance pour ce filtre."}
                 testId="staff-dues-empty"
               />
+            )}
+          </TabsContent>
+
+          <TabsContent value="retards" className="mt-6 space-y-2" data-testid="staff-arrears-list">
+            {(arrears.data ?? []).length > 0 && (
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <Stat
+                  title="Membres en retard"
+                  value={String(new Set((arrears.data ?? []).map((a) => a.member_id)).size)}
+                  testId="stat-arrears-members"
+                />
+                <Stat
+                  title="Total dû"
+                  value={fcfa((arrears.data ?? []).reduce((s, a) => s + a.total_due, 0))}
+                  testId="stat-arrears-total"
+                />
+                <Stat
+                  title="Dont pénalités"
+                  value={fcfa((arrears.data ?? []).reduce((s, a) => s + a.penalties, 0))}
+                  testId="stat-arrears-penalties"
+                />
+                <Stat
+                  title="Jours impayés"
+                  value={String((arrears.data ?? []).reduce((s, a) => s + a.late_days, 0))}
+                  testId="stat-arrears-days"
+                />
+              </div>
+            )}
+            {(arrears.data ?? []).map((a, i) => (
+              <div
+                key={`${a.member_id}-${a.tontine_id}`}
+                className="rounded-xl border border-border/70 bg-card px-4 py-3 text-sm"
+                data-testid={`arrear-row-${a.member_id}-${a.tontine_id}`}
+              >
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <span className="font-heading text-base text-muted-foreground">#{i + 1}</span>
+                  <span className="font-medium">{a.member_name}</span>
+                  <span className="ml-auto font-heading text-lg text-primary" data-testid={`arrear-total-${a.member_id}-${a.tontine_id}`}>
+                    {fcfa(a.total_due)}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {a.tontine_name} · {a.gerance_name} · {a.member_phone}
+                </p>
+                <p className="mt-1 flex flex-wrap gap-x-3 text-xs">
+                  <span>{a.late_days} jour(s) impayé(s) : {fcfa(a.late_amount)}</span>
+                  <span className="text-red-700">pénalités {fcfa(a.penalties)}</span>
+                  <span className="text-muted-foreground">le plus ancien : {a.oldest_unpaid}</span>
+                  <span className="text-muted-foreground">{a.paid_days}/{a.total_days} jours payés</span>
+                </p>
+              </div>
+            ))}
+            {(arrears.data ?? []).length === 0 && (
+              <Empty text="Aucun membre en retard — tout le monde est à jour." testId="staff-arrears-empty" />
             )}
           </TabsContent>
 

@@ -1,9 +1,17 @@
 crons:
-  - name: rappel-echeances
+  - name: rappel-echeances-matin
     description: "Rappelle chaque matin aux membres les cotisations du jour et les jours en retard"
     cron: "0 7 * * *"
     timezone: "Africa/Abidjan"
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     endpoint: "{{BASE_URL}}/api/cron/daily-reminders"
+    method: POST
+    enabled: true
+
+  - name: rappel-avant-heure-limite
+    description: "Rappelle en fin d'après-midi aux membres qui n'ont pas encore payé la journée, avant l'heure limite de 18h00"
+    cron: "0 16 * * *"
+    timezone: "Africa/Abidjan"
+    endpoint: "{{BASE_URL}}/api/cron/evening-reminders"
     method: POST
     enabled: true

@@ -279,6 +279,23 @@ export interface PublicInvitation {
   status: string;
 }
 
+export interface ArrearRow {
+  member_id: string;
+  member_name: string;
+  member_phone: string;
+  tontine_id: string;
+  tontine_name: string;
+  gerance_id: string;
+  gerance_name: string;
+  late_days: number;
+  late_amount: number;
+  penalties: number;
+  total_due: number;
+  oldest_unpaid: string;
+  paid_days: number;
+  total_days: number;
+}
+
 export interface ImportRow {
   line: number;
   first_name: string;

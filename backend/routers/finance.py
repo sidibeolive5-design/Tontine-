@@ -157,6 +157,70 @@ async def summary(
     return out
 
 
+class ArrearRow(BaseModel):
+    member_id: str
+    member_name: str
+    member_phone: str
+    tontine_id: str
+    tontine_name: str
+    gerance_id: str
+    gerance_name: str
+    late_days: int
+    late_amount: int
+    penalties: int
+    total_due: int
+    oldest_unpaid: str
+    paid_days: int
+    total_days: int
+
+
+@router.get("/arrears", response_model=list[ArrearRow])
+async def arrears(
+    user: dict[str, Any] = Depends(require_staff),
+    gerance_id: Optional[str] = None,
+    tontine_id: Optional[str] = None,
+):
+    """Members ranked by what they actually owe today — arrears + penalties."""
+    query = _scope(user, gerance_id, tontine_id, None)
+    rows = await db.contribution_due_dates.find(query, {"_id": 0}).to_list(50000)
+    today = today_iso()
+    buckets: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for r in rows:
+        buckets.setdefault((r["member_id"], r["tontine_id"]), []).append(r)
+
+    out: list[ArrearRow] = []
+    for (member_id, tid), items in buckets.items():
+        late = [i for i in items if effective_status(i, today) == "late"]
+        if not late:
+            continue
+        tontine = await db.tontines.find_one({"id": tid}, {"_id": 0})
+        gerance = await db.gerances.find_one({"id": items[0]["gerance_id"]}, {"_id": 0})
+        member = await db.users.find_one({"id": member_id}, {"_id": 0})
+        penalty_per_day = int(tontine.get("penalty_per_day", 500)) if tontine else 500
+        late_amount = sum(i["amount"] for i in late)
+        penalties = sum(late_days(i, today) * penalty_per_day for i in late)
+        out.append(
+            ArrearRow(
+                member_id=member_id,
+                member_name=f"{member['first_name']} {member['last_name']}" if member else "—",
+                member_phone=member["phone"] if member else "—",
+                tontine_id=tid,
+                tontine_name=tontine["name"] if tontine else "—",
+                gerance_id=items[0]["gerance_id"],
+                gerance_name=gerance["name"] if gerance else "—",
+                late_days=len(late),
+                late_amount=late_amount,
+                penalties=penalties,
+                total_due=late_amount + penalties,
+                oldest_unpaid=min(i["date"] for i in late),
+                paid_days=len([i for i in items if i["status"] == "paid"]),
+                total_days=len(items),
+            )
+        )
+    out.sort(key=lambda r: r.total_due, reverse=True)
+    return out
+
+
 class PaymentInput(BaseModel):
     tontine_id: str
     due_date_ids: list[str] = Field(min_length=1)

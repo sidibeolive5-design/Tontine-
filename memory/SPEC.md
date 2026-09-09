@@ -63,14 +63,6 @@ jamais présenté comme un paiement Wave, et tracé dans `audit_logs` + notifica
 - Les lignes de listes (échéances, paiements, demandes) passent en blocs empilés sur téléphone
   (plus de largeurs fixes `w-24`/`w-40`), et les boutons d'action deviennent pleine largeur.
 
-## Rappels quotidiens (cron plateforme)
-`.emergent/crons.yml` → `rappel-echeances`, tous les jours à 07h00 `Africa/Abidjan`,
-`POST /api/cron/daily-reminders` (routers/cron.py). Authentification
-`Authorization: Bearer $WEBHOOK_CRON_SECRET` (backend/.env), idempotence sur `X-Webhook-Id`
-(collection `cron_runs`), travail réel exécuté en tâche de fond. Une notification par membre,
-par tontine et par jour (clé `dedupe_key` dans `notification_deliveries`) : montant du jour +
-jours en retard et pénalités. Aucune duplication même si le cron est rejoué.
-
 ## Import Excel des membres
 `POST /api/members/import` (permission `manage_members`) : fichier `.xlsx` (openpyxl) ou `.csv`
 en base64, colonnes Prénom / Nom / Email / Téléphone (Email obligatoire). Un compte existant est
@@ -85,6 +77,26 @@ Côté gérant/admin, bouton « Voir la preuve » → `Dialog` avec image zoomab
 ## Filtres des cotisations (espace gérant/admin)
 Tous · À jour · En retard · Paiements à vérifier · Pénalités · Aujourd'hui · À venir —
 filtrage client sur les lignes de `contribution_due_dates` déjà renvoyées par `/api/due-dates`.
+
+## Rappels planifiés (crons plateforme)
+`.emergent/crons.yml` déclare deux tâches, toutes deux en `Africa/Abidjan` :
+- `rappel-echeances-matin` — 07h00, `POST /api/cron/daily-reminders` (slot `morning`) :
+  montant du jour + jours en retard et pénalités.
+- `rappel-avant-heure-limite` — 16h00, `POST /api/cron/evening-reminders` (slot `evening`) :
+  uniquement les membres dont la journée est encore impayée, avant l'heure limite de 18h00.
+
+Les deux passent par `routers/cron.py` : authentification
+`Authorization: Bearer $WEBHOOK_CRON_SECRET`, idempotence sur `X-Webhook-Id` + `job`
+(collection `cron_runs`), accusé 2xx immédiat puis travail en tâche de fond, et
+anti-duplication par `dedupe_key = reminder:{slot}:{member}:{tontine}:{jour}`
+dans `notification_deliveries`.
+
+## Tableau des retards (espace gérant/admin, onglet « Retards »)
+`GET /api/arrears` (staff, cloisonné par gérance) : une ligne par membre × tontine ayant au moins
+un jour en retard, triée par montant dû décroissant. Renvoie jours impayés, montant des
+cotisations en retard, pénalités (jours de retard × pénalité de la tontine), total dû,
+date du plus ancien impayé et progression. L'onglet affiche aussi 4 totaux :
+membres en retard, total dû, dont pénalités, jours impayés.
 
 ## Routes frontend
 `/`, `/tontines-disponibles`, `/details-tontine?id=`, `/comment-ca-marche`, `/regles`, `/a-propos`,
