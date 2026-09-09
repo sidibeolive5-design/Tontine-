@@ -181,22 +181,207 @@ async def tontine_detail(tontine_id: str, _: Optional[dict[str, Any]] = Depends(
     return await _enrich(await get_tontine(tontine_id))
 
 
+EDITABLE_FIELDS = {
+    "name", "description", "status", "deadline_time", "penalty_per_day", "start_date",
+    "interval_days", "duration_days", "daily_amount", "payout_amount", "member_count",
+    "beneficiary_count", "grace_days", "total_branches", "allow_multi_branch",
+    "max_branches_per_member", "penalty_mode", "turn_mode", "is_existing",
+}
+# Changing one of these rewrites the calendar / the payout dates, so it needs a confirmation.
+STRUCTURAL_FIELDS = {"start_date", "interval_days", "duration_days", "beneficiary_count", "daily_amount",
+                     "deadline_time"}
+
+
+async def _resync_positions(tontine: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite payout dates. A position already paid out (received) is never touched."""
+    start = parse_date(tontine["start_date"])
+    wanted = position_dates(start, int(tontine["interval_days"]), int(tontine["beneficiary_count"]))
+    existing = await db.positions.find({"tontine_id": tontine["id"]}, {"_id": 0}).sort("index", 1).to_list(500)
+    by_index = {p["index"]: p for p in existing}
+    protected = 0
+    for i, d in enumerate(wanted, start=1):
+        p = by_index.get(i)
+        if not p:
+            await db.positions.insert_one({
+                "id": new_id(), "tontine_id": tontine["id"], "gerance_id": tontine["gerance_id"],
+                "index": i, "payout_date": d, "member_id": None, "status": "open",
+            })
+        elif p.get("status") == "received":
+            protected += 1
+        elif p["payout_date"] != d:
+            await db.positions.update_one({"id": p["id"]}, {"$set": {"payout_date": d}})
+    removed = 0
+    for p in existing:
+        if p["index"] > len(wanted):
+            if p.get("status") == "received":
+                protected += 1
+                continue
+            await db.positions.delete_one({"id": p["id"]})
+            removed += 1
+    return {"positions": len(wanted), "protected_positions": protected, "removed_positions": removed}
+
+
+async def _resync_due_dates(tontine: dict[str, Any]) -> dict[str, Any]:
+    """Re-align every member's schedule on the tontine settings.
+
+    Paid / processing days are protected: they are never deleted nor re-priced.
+    """
+    from datetime import timedelta
+
+    start = parse_date(tontine["start_date"])
+    wanted = [(start + timedelta(days=i)).isoformat() for i in range(int(tontine["duration_days"]))]
+    wanted_set = set(wanted)
+    deadline = tontine.get("deadline_time", "18:00")
+    daily = int(tontine["daily_amount"])
+    added = updated = removed = protected = 0
+    members = await db.tontine_members.find({"tontine_id": tontine["id"], "status": "active"}, {"_id": 0}).to_list(2000)
+    for m in members:
+        branches = max(int(m.get("branches") or 1), 1)
+        amount = daily * branches
+        rows = await db.contribution_due_dates.find(
+            {"tontine_id": tontine["id"], "member_id": m["member_id"]}, {"_id": 0}
+        ).to_list(5000)
+        by_date = {r["date"]: r for r in rows}
+        for r in rows:
+            locked = r["status"] in ("paid", "processing")
+            if r["date"] not in wanted_set:
+                if locked:
+                    protected += 1
+                    continue
+                await db.contribution_due_dates.delete_one({"id": r["id"]})
+                removed += 1
+            elif locked:
+                protected += 1
+            elif r["amount"] != amount or r.get("deadline_time") != deadline:
+                await db.contribution_due_dates.update_one(
+                    {"id": r["id"]},
+                    {"$set": {"amount": amount, "deadline_time": deadline, "branches": branches,
+                              "synced_at": now_utc()}},
+                )
+                updated += 1
+        new_rows = []
+        for i, d in enumerate(wanted):
+            if d in by_date:
+                continue
+            new_rows.append({
+                "id": new_id(), "tontine_id": tontine["id"], "gerance_id": tontine["gerance_id"],
+                "member_id": m["member_id"], "date": d, "deadline_time": deadline, "amount": amount,
+                "branches": branches, "period": i + 1, "status": "pending", "payment_id": None,
+                "source": "system", "created_at": now_utc(), "synced_at": now_utc(),
+            })
+        if new_rows:
+            await db.contribution_due_dates.insert_many(new_rows)
+            added += len(new_rows)
+        # Periods are renumbered so "période n" stays consistent with the new calendar.
+        for i, d in enumerate(wanted):
+            await db.contribution_due_dates.update_one(
+                {"tontine_id": tontine["id"], "member_id": m["member_id"], "date": d},
+                {"$set": {"period": i + 1}},
+            )
+    return {"days_added": added, "days_updated": updated, "days_removed": removed,
+            "protected_days": protected, "members_resynced": len(members)}
+
+
+@router.get("/tontines/{tontine_id}/edit-impact")
+async def edit_impact(
+    tontine_id: str,
+    start_date: Optional[str] = None,
+    interval_days: Optional[int] = None,
+    duration_days: Optional[int] = None,
+    beneficiary_count: Optional[int] = None,
+    user: dict[str, Any] = Depends(require_staff),
+):
+    """Old dates vs new dates, before confirming a structural change (spec §34)."""
+    tontine = await get_tontine(tontine_id)
+    assert_gerance_access(user, tontine["gerance_id"])
+    old_positions = await db.positions.find({"tontine_id": tontine_id}, {"_id": 0}).sort("index", 1).to_list(500)
+    try:
+        new_start = parse_date(start_date or tontine["start_date"])
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Date invalide (format AAAA-MM-JJ)")
+    new_dates = position_dates(
+        new_start,
+        int(interval_days or tontine["interval_days"]),
+        int(beneficiary_count or tontine["beneficiary_count"]),
+    )
+    locked_days = await db.contribution_due_dates.count_documents(
+        {"tontine_id": tontine_id, "status": {"$in": ["paid", "processing"]}}
+    )
+    return {
+        "old_dates": [p["payout_date"] for p in old_positions],
+        "new_dates": new_dates,
+        "received_positions": sum(1 for p in old_positions if p.get("status") == "received"),
+        "locked_days": locked_days,
+        "old_duration_days": int(tontine["duration_days"]),
+        "new_duration_days": int(duration_days or tontine["duration_days"]),
+    }
+
+
 @router.patch("/tontines/{tontine_id}", response_model=TontineOut)
 async def update_tontine(tontine_id: str, body: dict[str, Any], user: dict[str, Any] = Depends(require_staff)):
     ensure_permission(user, "edit_tontine")
     tontine = await get_tontine(tontine_id)
     assert_gerance_access(user, tontine["gerance_id"])
-    allowed = {"name", "description", "status", "deadline_time", "penalty_per_day", "description", "start_date",
-               "interval_days", "duration_days", "grace_days", "total_branches", "allow_multi_branch",
-               "max_branches_per_member", "penalty_mode", "turn_mode"}
-    updates = {k: v for k, v in body.items() if k in allowed}
+    updates = {k: v for k, v in body.items() if k in EDITABLE_FIELDS}
     if not updates:
         raise HTTPException(status_code=422, detail="Rien à mettre à jour")
     if updates.get("status") and updates["status"] not in STATUSES:
         raise HTTPException(status_code=422, detail="Statut invalide")
+    if "penalty_mode" in updates and updates["penalty_mode"] not in ("member", "branch"):
+        raise HTTPException(status_code=422, detail="Mode de pénalité invalide")
+    if "turn_mode" in updates and updates["turn_mode"] not in ("manual", "auto"):
+        raise HTTPException(status_code=422, detail="Mode de gestion des tours invalide")
+    for field in ("daily_amount", "payout_amount", "interval_days", "duration_days", "member_count",
+                  "beneficiary_count"):
+        if field in updates and int(updates[field]) < 1:
+            raise HTTPException(status_code=422, detail=f"{field} doit être supérieur à 0")
+        if field in updates:
+            updates[field] = int(updates[field])
+    if "start_date" in updates:
+        try:
+            parse_date(str(updates["start_date"]))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Date de début invalide (format AAAA-MM-JJ)")
+    if not updates.get("allow_multi_branch", tontine.get("allow_multi_branch")):
+        updates["max_branches_per_member"] = 1
+    merged = {**tontine, **updates}
+    if "total_branches" in updates and not updates["total_branches"]:
+        merged["total_branches"] = merged["member_count"]
+        updates["total_branches"] = merged["member_count"]
+    used = await branches_used(tontine_id)
+    if branch_capacity(merged) and used > branch_capacity(merged):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{used} branche(s) sont déjà attribuées : la capacité ne peut pas descendre en dessous",
+        )
+    from datetime import timedelta
+
+    new_start = parse_date(str(merged["start_date"]))
+    updates["end_date"] = (new_start + timedelta(days=int(merged["duration_days"]) - 1)).isoformat()
     await db.tontines.update_one({"id": tontine_id}, {"$set": updates})
-    await audit(user, "tontine_updated", "tontine", tontine_id, tontine["gerance_id"], updates)
-    return await _enrich(await get_tontine(tontine_id))
+    fresh = await get_tontine(tontine_id)
+    impact: dict[str, Any] = {}
+    if STRUCTURAL_FIELDS & set(updates.keys()):
+        impact.update(await _resync_positions(fresh))
+        impact.update(await _resync_due_dates(fresh))
+    await audit(user, "tontine_updated", "tontine", tontine_id, tontine["gerance_id"],
+                {"updates": updates, "impact": impact})
+    if impact.get("members_resynced"):
+        for m in await db.tontine_members.find(
+            {"tontine_id": tontine_id, "status": "active"}, {"_id": 0, "member_id": 1}
+        ).to_list(2000):
+            await notify(
+                m["member_id"],
+                "Tontine mise à jour",
+                f"Les paramètres de {fresh['name']} ont été modifiés par votre gérance. "
+                f"Consultez votre calendrier : {fresh['daily_amount']} FCFA/jour, "
+                f"début le {fresh['start_date']}, heure limite {fresh['deadline_time']}. "
+                "Vos jours déjà payés sont conservés.",
+                tontine["gerance_id"],
+                tontine_id,
+                "tontine_updated",
+            )
+    return await _enrich(fresh)
 
 
 @router.get("/tontines/{tontine_id}/positions", response_model=list[PositionOut])

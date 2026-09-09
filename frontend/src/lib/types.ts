@@ -89,6 +89,15 @@ export interface Tontine {
   branches_available: number;
 }
 
+export interface EditImpact {
+  old_dates: string[];
+  new_dates: string[];
+  received_positions: number;
+  locked_days: number;
+  old_duration_days: number;
+  new_duration_days: number;
+}
+
 export interface Position {
   id: string;
   tontine_id: string;

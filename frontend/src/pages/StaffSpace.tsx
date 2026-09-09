@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -21,6 +21,7 @@ import {
   type ArrearRow,
   type AuditRow,
   type DueDate,
+  type EditImpact,
   type Gerance,
   type ImportResult,
   type Invitation,
@@ -186,9 +187,263 @@ function CreateTontineForm() {
   );
 }
 
+const EDIT_NUMBER_FIELDS: [keyof EditForm, string][] = [
+  ["member_count", "Nombre de membres"],
+  ["daily_amount", "Cotisation quotidienne (FCFA)"],
+  ["payout_amount", "Montant bénéficiaire (FCFA)"],
+  ["interval_days", "Intervalle entre prises (jours)"],
+  ["beneficiary_count", "Nombre de bénéficiaires"],
+  ["duration_days", "Durée (jours)"],
+  ["penalty_per_day", "Pénalité / jour (FCFA)"],
+];
+
+type EditForm = {
+  name: string;
+  description: string;
+  status: string;
+  member_count: number;
+  daily_amount: number;
+  payout_amount: number;
+  interval_days: number;
+  beneficiary_count: number;
+  duration_days: number;
+  penalty_per_day: number;
+  start_date: string;
+  deadline_time: string;
+  allow_multi_branch: boolean;
+  max_branches_per_member: number;
+  total_branches: number | null;
+  penalty_mode: string;
+  turn_mode: string;
+};
+
+const STATUS_OPTIONS: [string, string][] = [
+  ["draft", "Brouillon"],
+  ["pending_validation", "En attente de validation"],
+  ["open", "Ouverte"],
+  ["running", "En cours"],
+  ["finished", "Terminée"],
+  ["suspended", "Suspendue"],
+  ["cancelled", "Annulée"],
+];
+
+function EditTontineDialog({ t, onClose }: { t: Tontine | null; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [f, setF] = useState<EditForm | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    if (!t) {
+      setF(null);
+      setConfirming(false);
+      return;
+    }
+    setF({
+      name: t.name,
+      description: t.description,
+      status: t.status,
+      member_count: t.member_count,
+      daily_amount: t.daily_amount,
+      payout_amount: t.payout_amount,
+      interval_days: t.interval_days,
+      beneficiary_count: t.beneficiary_count,
+      duration_days: t.duration_days,
+      penalty_per_day: t.penalty_per_day,
+      start_date: t.start_date,
+      deadline_time: t.deadline_time,
+      allow_multi_branch: t.allow_multi_branch,
+      max_branches_per_member: t.max_branches_per_member,
+      total_branches: t.total_branches,
+      penalty_mode: t.penalty_mode,
+      turn_mode: t.turn_mode,
+    });
+    setConfirming(false);
+  }, [t]);
+
+  const structural =
+    Boolean(t && f) &&
+    (f!.start_date !== t!.start_date ||
+      f!.interval_days !== t!.interval_days ||
+      f!.duration_days !== t!.duration_days ||
+      f!.beneficiary_count !== t!.beneficiary_count ||
+      f!.daily_amount !== t!.daily_amount ||
+      f!.deadline_time !== t!.deadline_time);
+
+  const impact = useQuery({
+    queryKey: ["tontine", t?.id, "edit-impact", f?.start_date, f?.interval_days, f?.duration_days, f?.beneficiary_count],
+    queryFn: () =>
+      apiGet<EditImpact>(
+        `/tontines/${t!.id}/edit-impact?start_date=${f!.start_date}&interval_days=${f!.interval_days}` +
+          `&duration_days=${f!.duration_days}&beneficiary_count=${f!.beneficiary_count}`,
+      ),
+    enabled: Boolean(t && f && confirming),
+    retry: false,
+  });
+
+  const save = useMutation({
+    mutationFn: () => apiPatch<Tontine>(`/tontines/${t!.id}`, f),
+    onSuccess: (up) => {
+      toast.success(`« ${up.name} » mise à jour`);
+      qc.invalidateQueries();
+      onClose();
+    },
+    onError: (e) => toast.error(detail(e, "Modification impossible")),
+  });
+
+  const num = (k: keyof EditForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setF((p) => (p ? { ...p, [k]: Number(e.target.value) } : p));
+
+  return (
+    <Dialog open={Boolean(t)} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] max-w-[95vw] overflow-y-auto sm:max-w-2xl" data-testid="edit-tontine-dialog">
+        <DialogHeader>
+          <DialogTitle className="font-heading">Modifier « {t?.name} »</DialogTitle>
+        </DialogHeader>
+        {f && !confirming && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="e-name">Nom de la tontine</Label>
+              <Input id="e-name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} data-testid="edit-tontine-name-input" />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="e-desc">Description</Label>
+              <Textarea id="e-desc" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} data-testid="edit-tontine-description-input" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="e-status">Statut</Label>
+              <select
+                id="e-status"
+                className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm"
+                value={f.status}
+                onChange={(e) => setF({ ...f, status: e.target.value })}
+                data-testid="edit-tontine-status-select"
+              >
+                {STATUS_OPTIONS.map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="e-start">Date de début</Label>
+              <Input id="e-start" type="date" value={f.start_date} onChange={(e) => setF({ ...f, start_date: e.target.value })} data-testid="edit-tontine-startdate-input" />
+            </div>
+            {EDIT_NUMBER_FIELDS.map(([k, l]) => (
+              <div key={k} className="space-y-2">
+                <Label htmlFor={`e-${k}`}>{l}</Label>
+                <Input id={`e-${k}`} type="number" min={1} value={String(f[k])} onChange={num(k)} data-testid={`edit-tontine-${k}-input`} />
+              </div>
+            ))}
+            <div className="space-y-2">
+              <Label htmlFor="e-deadline">Heure limite</Label>
+              <Input id="e-deadline" type="time" value={f.deadline_time} onChange={(e) => setF({ ...f, deadline_time: e.target.value })} data-testid="edit-tontine-deadline-input" />
+            </div>
+            <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/30 p-4 sm:col-span-2">
+              <p className="text-sm font-medium">Branches (parts) par membre</p>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={f.allow_multi_branch}
+                  onCheckedChange={(v) =>
+                    setF({ ...f, allow_multi_branch: Boolean(v), max_branches_per_member: v ? Math.max(f.max_branches_per_member, 2) : 1 })
+                  }
+                  data-testid="edit-tontine-multibranch-checkbox"
+                />
+                Autoriser plusieurs branches par membre
+              </label>
+              {f.allow_multi_branch && (
+                <div className="space-y-2">
+                  <Label htmlFor="e-maxbranch">Maximum de branches par membre</Label>
+                  <Input id="e-maxbranch" type="number" min={1} value={String(f.max_branches_per_member)} onChange={num("max_branches_per_member")} data-testid="edit-tontine-maxbranches-input" />
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="e-totalbranch">Total de branches disponibles (vide = nombre de membres)</Label>
+                <Input
+                  id="e-totalbranch"
+                  type="number"
+                  min={1}
+                  value={f.total_branches === null ? "" : String(f.total_branches)}
+                  onChange={(e) => setF({ ...f, total_branches: e.target.value ? Number(e.target.value) : null })}
+                  data-testid="edit-tontine-totalbranches-input"
+                />
+                <p className="text-xs text-muted-foreground">{t?.branches_used} branche(s) déjà attribuée(s).</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="e-penalmode">Mode de calcul de la pénalité</Label>
+                <select id="e-penalmode" className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm" value={f.penalty_mode} onChange={(e) => setF({ ...f, penalty_mode: e.target.value })} data-testid="edit-tontine-penaltymode-select">
+                  <option value="member">Par membre</option>
+                  <option value="branch">Par branche</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="e-turnmode">Gestion des tours</Label>
+                <select id="e-turnmode" className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm" value={f.turn_mode} onChange={(e) => setF({ ...f, turn_mode: e.target.value })} data-testid="edit-tontine-turnmode-select">
+                  <option value="manual">Manuelle par le gérant</option>
+                  <option value="auto">Automatique</option>
+                </select>
+              </div>
+            </div>
+            {structural && (
+              <p className="rounded-xl bg-amber-500/10 p-3 text-xs text-amber-900 sm:col-span-2" data-testid="edit-tontine-structural-warning">
+                ⚠️ Vous modifiez le calendrier (dates, durée, intervalle, cotisation ou heure limite). Les anciennes et
+                nouvelles dates vous seront présentées avant enregistrement. Les jours déjà payés ou en cours de
+                vérification sont protégés.
+              </p>
+            )}
+            <Button
+              className="sm:col-span-2"
+              onClick={() => (structural ? setConfirming(true) : save.mutate())}
+              disabled={save.isPending}
+              data-testid="edit-tontine-submit-button"
+            >
+              {save.isPending ? "Enregistrement…" : structural ? "Voir l'impact et confirmer" : "Enregistrer les modifications"}
+            </Button>
+          </div>
+        )}
+        {f && confirming && (
+          <div className="space-y-4" data-testid="edit-tontine-impact">
+            {impact.isLoading && <p className="text-sm text-muted-foreground">Calcul de l'impact…</p>}
+            {impact.data && (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-xl border border-border/60 p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Anciennes dates de prise</p>
+                    <ul className="mt-2 space-y-1 text-sm" data-testid="edit-tontine-old-dates">
+                      {impact.data.old_dates.map((d, i) => <li key={`${d}-${i}`}>Position {i + 1} — {d}</li>)}
+                    </ul>
+                  </div>
+                  <div className="rounded-xl border border-primary/40 bg-primary/5 p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Nouvelles dates de prise</p>
+                    <ul className="mt-2 space-y-1 text-sm" data-testid="edit-tontine-new-dates">
+                      {impact.data.new_dates.map((d, i) => <li key={`${d}-${i}`}>Position {i + 1} — {d}</li>)}
+                    </ul>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Durée : {impact.data.old_duration_days} → {impact.data.new_duration_days} jours ·{" "}
+                  {impact.data.received_positions} prise(s) déjà versée(s) conservée(s) ·{" "}
+                  {impact.data.locked_days} jour(s) payé(s) ou en vérification protégé(s).
+                </p>
+              </>
+            )}
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button variant="outline" className="flex-1" onClick={() => setConfirming(false)} data-testid="edit-tontine-back-button">
+                Revenir aux champs
+              </Button>
+              <Button className="flex-1" onClick={() => save.mutate()} disabled={save.isPending} data-testid="edit-tontine-confirm-button">
+                {save.isPending ? "Enregistrement…" : "Confirmer la modification"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function TontineCard({ t }: { t: Tontine }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [historicalPosition, setHistoricalPosition] = useState<Position | null>(null);
   const positions = useQuery({
     queryKey: ["tontine", t.id, "positions"],
@@ -245,9 +500,12 @@ function TontineCard({ t }: { t: Tontine }) {
         {" · "}{t.branches_used}/{t.total_branches ?? t.member_count} branches
         {t.allow_multi_branch ? ` · jusqu'à ${t.max_branches_per_member} branches/membre` : " · 1 branche/membre"}
       </p>
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex flex-wrap gap-2">
         <Button size="sm" variant="outline" onClick={() => setOpen((o) => !o)} data-testid={`tontine-positions-toggle-${t.id}`}>
           {open ? "Masquer les positions" : "Gérer les positions"}
+        </Button>
+        <Button size="sm" onClick={() => setEditing(true)} data-testid={`tontine-edit-button-${t.id}`}>
+          Modifier la tontine
         </Button>
         <Link to={`/details-tontine?id=${t.id}`} className={buttonVariants({ size: "sm", variant: "ghost" })}>
           Page publique
@@ -294,6 +552,7 @@ function TontineCard({ t }: { t: Tontine }) {
         </div>
       )}
       <HistoricalPayoutDialog position={historicalPosition} onClose={() => setHistoricalPosition(null)} />
+      <EditTontineDialog t={editing ? t : null} onClose={() => setEditing(false)} />
     </div>
   );
 }

@@ -160,6 +160,26 @@ nouveau paiement.
   garde `branches` pour le mode de pénalité « par branche ». Les documents antérieurs sans
   `branches` comptent pour 1 part — aucune migration nécessaire.
 
+## Modifier une tontine déjà créée (admin ET gérants)
+Bouton « Modifier la tontine » sur chaque `TontineCard` (espaces `/administration` et `/gerance`,
+testid `tontine-edit-button-{id}`) → `EditTontineDialog`.
+- `PATCH /api/tontines/{id}` (permission `edit_tontine`, cloisonné par gérance) accepte désormais :
+  nom, description, statut, date de début, heure limite, cotisation quotidienne, montant bénéficiaire,
+  intervalle, nombre de bénéficiaires, durée, nombre de membres, pénalité/jour, jours de tolérance,
+  branches (total / multi / max), `penalty_mode`, `turn_mode`, `is_existing`. `end_date` est recalculé.
+- Champs **structurels** (`start_date`, `interval_days`, `duration_days`, `beneficiary_count`,
+  `daily_amount`, `deadline_time`) → écran de confirmation obligatoire alimenté par
+  `GET /api/tontines/{id}/edit-impact?…` : **anciennes dates** vs **nouvelles dates** de prise,
+  durée avant/après, prises déjà versées et jours verrouillés (spec §34).
+- À l'enregistrement, `_resync_positions()` réécrit les dates de prise (une position `received`
+  n'est jamais modifiée ni supprimée) et `_resync_due_dates()` réaligne le calendrier de chaque
+  membre : ajout des jours manquants, suppression des jours `pending` hors calendrier, remise à
+  jour du montant (`daily_amount × branches`) et de l'heure limite. Les jours `paid` / `processing`
+  sont **protégés** (jamais supprimés, jamais re-tarifés) ; les périodes sont renumérotées.
+- Refus 409 si la capacité en branches descend sous les branches déjà attribuées ; 422 sur date,
+  statut, mode ou valeur invalide. Chaque modification est auditée (`tontine_updated`, avec l'impact)
+  et notifie tous les membres actifs de la tontine.
+
 ## Reçu de paiement
 À la validation, `receipt_number = ANV-<année>-<séquence par gérance>` est attribué et affiché
 côté membre et côté gérant, avec le moyen de paiement, la référence saisie et le montant.
