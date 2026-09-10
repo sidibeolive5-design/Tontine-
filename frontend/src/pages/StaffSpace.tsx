@@ -1360,6 +1360,17 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                       <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => decidePayment.mutate({ id: p.id, action: "reject" })} data-testid={`payment-reject-${p.id}`}>Rejeter</Button>
                     </>
                   )}
+                  {p.status === "validated" && (
+                    <a
+                      href={`/api/payments/${p.id}/receipt.pdf`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={buttonVariants({ size: "sm", variant: "outline" })}
+                      data-testid={`payment-receipt-pdf-${p.id}`}
+                    >
+                      Reçu PDF{p.receipt_number ? ` — ${p.receipt_number}` : ""}
+                    </a>
+                  )}
                 </div>
               </div>
             ))}
@@ -1504,6 +1515,15 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                     Historique enregistré par l'{p.source.replace("historique_", "")}
                   </p>
                 )}
+                <a
+                  href={`/api/payouts/${p.id}/receipt.pdf`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`mt-3 ${buttonVariants({ size: "sm", variant: "outline" })}`}
+                  data-testid={`payout-receipt-pdf-${p.id}`}
+                >
+                  Imprimer le reçu PDF{p.receipt_number ? ` — ${p.receipt_number}` : ""}
+                </a>
               </div>
             ))}
             {(payouts.data ?? []).length === 0 && <Empty text="Aucune prise confirmée." testId="staff-payouts-empty" />}

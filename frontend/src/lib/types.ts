@@ -223,6 +223,7 @@ export interface Payout {
   confirmed_by_name: string;
   status: string;
   source: string;
+  receipt_number: string | null;
   note: string | null;
   created_at: string;
 }

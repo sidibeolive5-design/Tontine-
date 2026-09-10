@@ -180,6 +180,23 @@ testid `tontine-edit-button-{id}`) → `EditTontineDialog`.
   statut, mode ou valeur invalide. Chaque modification est auditée (`tontine_updated`, avec l'impact)
   et notifie tous les membres actifs de la tontine.
 
+## Reçus PDF imprimables
+`lib/pdf.py` (reportlab) génère un reçu A4 à l'identité de la plateforme (nom, slogan, logo, contacts
+lus dans `platform_settings`), avec bandeau, tableau de détails, total encadré, zone de signatures
+et mention de génération automatique.
+- `GET /api/payments/{id}/receipt.pdf` — **409** tant que le paiement n'est pas `validated`
+  (aucun reçu avant vérification humaine). Contenu : membre, téléphone, tontine, gérance, jours
+  réglés, cotisations, pénalités, moyen + numéro/référence, dates de réception et de validation,
+  validateur, total.
+- `GET /api/payouts/{id}/receipt.pdf` — bénéficiaire, tontine, gérance, position, date, responsable,
+  montant. `receipt_number = ANV-P-<année>-<séquence par gérance>` attribué à la confirmation et à
+  l'enregistrement historique (les prises antérieures reçoivent leur numéro au premier téléchargement).
+  Une prise historique porte la mention « Historique enregistré par l'… ».
+- Accès : membre propriétaire, gérant de la gérance, admin (401 anonyme, 403 hors périmètre,
+  404 inconnu). Réponse `application/pdf` en `inline` → ouverture/impression directe depuis
+  « Mes paiements », « Mes prises » (espace membre) et les onglets Paiements / Prises (espace staff),
+  testids `payment-receipt-pdf-{id}` et `payout-receipt-pdf-{id}`.
+
 ## Reçu de paiement
 À la validation, `receipt_number = ANV-<année>-<séquence par gérance>` est attribué et affiché
 côté membre et côté gérant, avec le moyen de paiement, la référence saisie et le montant.

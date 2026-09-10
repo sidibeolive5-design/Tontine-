@@ -1,9 +1,10 @@
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from lib.auth import current_user, ensure_permission, require_staff
+from lib.pdf import build_receipt, fcfa, receipt_datetime
 from lib.core import (
     assert_gerance_access,
     audit,
@@ -502,6 +503,131 @@ async def payment_proof(payment_id: str, user: dict[str, Any] = Depends(current_
     return {"proof_image": p["proof_image"], "proof_filename": p["proof_filename"]}
 
 
+async def _platform_identity() -> dict[str, Any]:
+    doc = await db.platform_settings.find_one({"id": "platform"}, {"_id": 0}) or {}
+    return {
+        "name": doc.get("name") or "AIDONS-NOUS VIVANTS",
+        "tagline": doc.get("slogan") or "Cotiser ensemble, recevoir sereinement.",
+        "logo": doc.get("logo"),
+        "phone": doc.get("phone"),
+        "whatsapp": doc.get("whatsapp"),
+        "email": doc.get("email"),
+    }
+
+
+def _assert_receipt_access(doc: dict[str, Any], user: dict[str, Any]) -> None:
+    if user["role"] == "member" and doc["member_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Reçu privé")
+    if user["role"] == "manager":
+        assert_gerance_access(user, doc["gerance_id"])
+
+
+def _pdf_response(content: bytes, filename: str) -> Response:
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.get("/payments/{payment_id}/receipt.pdf")
+async def payment_receipt_pdf(payment_id: str, user: dict[str, Any] = Depends(current_user)):
+    """Printable receipt — only for a payment a human has actually validated."""
+    p = await db.payments.find_one({"id": payment_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Paiement introuvable")
+    _assert_receipt_access(p, user)
+    if p["status"] != "validated":
+        raise HTTPException(status_code=409, detail="Le reçu est disponible une fois le paiement validé")
+    t = await db.tontines.find_one({"id": p["tontine_id"]}, {"_id": 0})
+    g = await db.gerances.find_one({"id": p["gerance_id"]}, {"_id": 0})
+    m = await db.users.find_one({"id": p["member_id"]}, {"_id": 0})
+    decider = await db.users.find_one({"id": p.get("decided_by")}, {"_id": 0}) if p.get("decided_by") else None
+    days = p.get("days") or []
+    rows = [
+        ("Membre", f"{m['first_name']} {m['last_name']}" if m else "—"),
+        ("Téléphone", (m or {}).get("phone") or "—"),
+        ("Tontine", (t or {}).get("name") or "—"),
+        ("Gérance", (g or {}).get("name") or "—"),
+        ("Jours réglés", f"{len(days)} jour(s) : " + ", ".join(days) if days else "—"),
+        ("Cotisations", fcfa(p.get("contribution_amount", p["amount"]))),
+        ("Pénalités", fcfa(p.get("penalty_amount", 0))),
+        ("Moyen de paiement", p.get("method_name") or p.get("method") or "—"),
+        ("Numéro / référence", " · ".join([v for v in (p.get("method_number"), p.get("reference")) if v]) or "—"),
+        ("Preuve reçue le", receipt_datetime(p.get("created_at"))),
+        ("Validé le", receipt_datetime(p.get("decided_at"))),
+        ("Validé par", f"{decider['first_name']} {decider['last_name']}" if decider else "—"),
+    ]
+    pdf = build_receipt(
+        platform=await _platform_identity(),
+        kind="payment",
+        receipt_number=p.get("receipt_number") or p["id"][:8].upper(),
+        rows=rows,
+        total_label="Montant total réglé",
+        total_value=fcfa(p["amount"]),
+        footer_note=(
+            "Ce reçu atteste l'enregistrement des jours de cotisation listés ci-dessus. "
+            "Conservez-le : il fait foi auprès de votre gérance en cas de contestation."
+        ),
+    )
+    return _pdf_response(pdf, f"recu-cotisation-{p.get('receipt_number') or p['id'][:8]}.pdf")
+
+
+@router.get("/payouts/{payout_id}/receipt.pdf")
+async def payout_receipt_pdf(payout_id: str, user: dict[str, Any] = Depends(current_user)):
+    p = await db.payouts.find_one({"id": payout_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Prise introuvable")
+    _assert_receipt_access(p, user)
+    number = p.get("receipt_number")
+    if not number:
+        # Payouts confirmed before receipts existed get their number on first download.
+        number = await _next_payout_receipt_number(p["gerance_id"])
+        await db.payouts.update_one({"id": payout_id}, {"$set": {"receipt_number": number}})
+    t = await db.tontines.find_one({"id": p["tontine_id"]}, {"_id": 0})
+    g = await db.gerances.find_one({"id": p["gerance_id"]}, {"_id": 0})
+    m = await db.users.find_one({"id": p["member_id"]}, {"_id": 0})
+    c = await db.users.find_one({"id": p.get("confirmed_by")}, {"_id": 0}) if p.get("confirmed_by") else None
+    historical = str(p.get("source", "")).startswith("historique")
+    rows = [
+        ("Bénéficiaire", f"{m['first_name']} {m['last_name']}" if m else "—"),
+        ("Téléphone", (m or {}).get("phone") or "—"),
+        ("Tontine", (t or {}).get("name") or "—"),
+        ("Gérance", (g or {}).get("name") or "—"),
+        ("Position", f"Position {p.get('position_index', '—')}"),
+        ("Date de la prise", p.get("payout_date") or "—"),
+        ("Statut", "Prise reçue"),
+        ("Confirmé par", f"{c['first_name']} {c['last_name']}" if c else "—"),
+        ("Enregistré le", receipt_datetime(p.get("created_at"))),
+    ]
+    if p.get("note"):
+        rows.append(("Note", str(p["note"])))
+    pdf = build_receipt(
+        platform=await _platform_identity(),
+        kind="payout",
+        receipt_number=number,
+        rows=rows,
+        total_label="Montant de la prise",
+        total_value=fcfa(p["amount"]),
+        footer_note=(
+            "Ce reçu est émis après confirmation réelle de la remise de la prise au bénéficiaire "
+            "par le responsable de la gérance."
+        ),
+        watermark=(
+            "Historique enregistré par l'"
+            + ("administrateur" if p.get("source") == "historique_administrateur" else "gérant")
+            if historical
+            else None
+        ),
+    )
+    return _pdf_response(pdf, f"recu-prise-{number}.pdf")
+
+
+async def _next_payout_receipt_number(gerance_id: str) -> str:
+    seq = await db.payouts.count_documents({"gerance_id": gerance_id, "receipt_number": {"$ne": None}}) + 1
+    return f"ANV-P-{now_utc().year}-{seq:05d}"
+
+
 class DecidePayment(BaseModel):
     action: str  # validate | reject
     reason: Optional[str] = None
@@ -612,6 +738,7 @@ class PayoutOut(BaseModel):
     confirmed_by_name: str
     status: str
     source: str = "confirmation"
+    receipt_number: Optional[str] = None
     note: Optional[str] = None
     created_at: Any
 
@@ -640,6 +767,7 @@ async def confirm_payout(payload: PayoutInput, user: dict[str, Any] = Depends(re
         "confirmed_by": user["id"],
         "status": "received",
         "source": "confirmation",
+        "receipt_number": await _next_payout_receipt_number(tontine["gerance_id"]),
         "created_at": now_utc(),
     }
     await db.payouts.insert_one(doc)
@@ -711,6 +839,7 @@ async def record_historical_payout(
         "confirmed_by": user["id"],
         "status": "received",
         "source": f"historique_{label}",
+        "receipt_number": await _next_payout_receipt_number(tontine["gerance_id"]),
         "note": payload.note,
         "created_at": now_utc(),
     }

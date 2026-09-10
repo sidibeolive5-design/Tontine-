@@ -440,6 +440,17 @@ export default function MemberSpace() {
                 {p.receipt_number && <span className="text-xs text-primary" data-testid={`receipt-${p.id}`}>Reçu {p.receipt_number}</span>}
                 {p.penalty_amount > 0 && <span className="text-xs text-red-700">dont {fcfa(p.penalty_amount)} de pénalités</span>}
                 <span className="ml-auto"><StatusPill value={p.status} /></span>
+                {p.status === "validated" && (
+                  <a
+                    href={`/api/payments/${p.id}/receipt.pdf`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center rounded-lg border border-primary/40 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                    data-testid={`payment-receipt-pdf-${p.id}`}
+                  >
+                    Reçu PDF
+                  </a>
+                )}
               </div>
             ))}
             {(payments.data ?? []).length === 0 && <Empty text="Aucun paiement envoyé." testId="my-payments-empty" />}
@@ -477,6 +488,15 @@ export default function MemberSpace() {
                 <p className="text-muted-foreground">
                   {p.tontine_name} · {p.gerance_name} · position {p.position_index} · {p.payout_date} · confirmé par {p.confirmed_by_name}
                 </p>
+                <a
+                  href={`/api/payouts/${p.id}/receipt.pdf`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 inline-flex items-center rounded-lg border border-primary/40 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                  data-testid={`payout-receipt-pdf-${p.id}`}
+                >
+                  Imprimer le reçu PDF{p.receipt_number ? ` — ${p.receipt_number}` : ""}
+                </a>
               </div>
             ))}
             {(payouts.data ?? []).length === 0 && <Empty text="Aucune prise reçue pour le moment." testId="my-payouts-empty" />}
