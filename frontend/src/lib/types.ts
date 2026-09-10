@@ -204,6 +204,8 @@ export interface Payment {
   receipt_number: string | null;
   status: string;
   proof_filename: string;
+  source: string;
+  note: string | null;
   created_at: string;
   decided_at: string | null;
   decided_by_name: string | null;

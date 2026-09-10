@@ -42,6 +42,10 @@ import {
 const detail = (e: unknown, fallback: string) =>
   (e instanceof ApiError ? (e.body as { detail?: string } | null)?.detail : null) ?? fallback;
 
+// "saisie_gérant" / "historique_administrateur" -> "le gérant" / "l'administrateur"
+const byLabel = (source: string) =>
+  source.endsWith("administrateur") ? "l'administrateur" : "le gérant";
+
 function CreateTontineForm() {
   const qc = useQueryClient();
   const [f, setF] = useState({
@@ -610,6 +614,205 @@ function CreateManagerForm() {
         {create.isPending ? "Création…" : "Créer le gérant et sa gérance"}
       </Button>
     </form>
+  );
+}
+
+function RecordMemberPaymentCard({ tontines }: { tontines: Tontine[] }) {
+  const qc = useQueryClient();
+  const [tontineId, setTontineId] = useState("");
+  const [memberId, setMemberId] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
+  const [proof, setProof] = useState<{ data: string; name: string } | null>(null);
+  const [reference, setReference] = useState("");
+  const [note, setNote] = useState("");
+  const [validateNow, setValidateNow] = useState(true);
+
+  const members = useQuery({
+    queryKey: ["tontine", tontineId, "members"],
+    queryFn: () => apiGet<{ member_id: string; name: string }[]>(`/tontines/${tontineId}/members`),
+    enabled: Boolean(tontineId),
+    retry: false,
+  });
+  const memberDues = useQuery({
+    queryKey: ["due-dates", tontineId, memberId],
+    queryFn: () => apiGet<DueDate[]>(`/due-dates?tontine_id=${tontineId}&member_id=${memberId}`),
+    enabled: Boolean(tontineId && memberId),
+    retry: false,
+  });
+
+  const payable = (memberDues.data ?? []).filter((d) => d.status === "pending");
+  const chosen = payable.filter((d) => selected.includes(d.id));
+  const contributions = chosen.reduce((s, d) => s + d.amount, 0);
+  const penalties = chosen.reduce((s, d) => s + d.penalty, 0);
+
+  const reset = () => {
+    setSelected([]);
+    setProof(null);
+    setReference("");
+    setNote("");
+  };
+
+  const save = useMutation({
+    mutationFn: () =>
+      apiPost<Payment>("/payments/for-member", {
+        tontine_id: tontineId,
+        member_id: memberId,
+        due_date_ids: selected,
+        method: "wave",
+        proof_image: proof?.data,
+        proof_filename: proof?.name,
+        reference: reference.trim() || undefined,
+        note: note.trim() || undefined,
+        validate_now: validateNow,
+      }),
+    onSuccess: (p) => {
+      toast.success(
+        p.status === "validated"
+          ? `Paiement enregistré et validé${p.receipt_number ? ` — reçu ${p.receipt_number}` : ""}`
+          : "Paiement enregistré — en attente de vérification",
+      );
+      reset();
+      qc.invalidateQueries();
+    },
+    onError: (e) => toast.error(detail(e, "Enregistrement impossible")),
+  });
+
+  const pickFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setProof({ data: String(reader.result), name: file.name });
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4 sm:p-5" data-testid="record-member-payment-card">
+      <h3 className="font-heading text-xl">Enregistrer un paiement pour un membre</h3>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Pour un membre qui a payé sans envoyer sa preuve (espèces, dépôt direct, preuve reçue par WhatsApp).
+        La saisie est tracée « saisie par le gérant / l'administrateur ».
+      </p>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="rp-tontine">Tontine</Label>
+          <select
+            id="rp-tontine"
+            className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm"
+            value={tontineId}
+            onChange={(e) => {
+              setTontineId(e.target.value);
+              setMemberId("");
+              reset();
+            }}
+            data-testid="record-payment-tontine-select"
+          >
+            <option value="">— Choisir —</option>
+            {tontines.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="rp-member">Membre</Label>
+          <select
+            id="rp-member"
+            className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm"
+            value={memberId}
+            onChange={(e) => {
+              setMemberId(e.target.value);
+              setSelected([]);
+            }}
+            disabled={!tontineId}
+            data-testid="record-payment-member-select"
+          >
+            <option value="">— Choisir —</option>
+            {(members.data ?? []).map((m) => (
+              <option key={m.member_id} value={m.member_id}>{m.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {memberId && (
+        <>
+          <div className="mt-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-medium">Jours à régler ({payable.length} impayé(s))</p>
+              <div className="flex gap-2">
+                <Button size="xs" variant="outline" onClick={() => setSelected(payable.map((d) => d.id))} data-testid="record-payment-select-all">
+                  Tout sélectionner
+                </Button>
+                <Button size="xs" variant="ghost" onClick={() => setSelected([])} data-testid="record-payment-clear">
+                  Vider
+                </Button>
+              </div>
+            </div>
+            <div className="mt-2 max-h-64 space-y-1 overflow-y-auto pr-1" data-testid="record-payment-days">
+              {payable.map((d) => (
+                <label key={d.id} className="flex items-center gap-3 rounded-xl border border-border/60 bg-card px-3 py-2 text-sm">
+                  <Checkbox
+                    checked={selected.includes(d.id)}
+                    onCheckedChange={(v) => setSelected((s) => (v ? [...s, d.id] : s.filter((x) => x !== d.id)))}
+                    data-testid={`record-payment-day-${d.id}`}
+                  />
+                  <span className="font-medium">{d.date}</span>
+                  <span>{fcfa(d.amount)}</span>
+                  {d.penalty > 0 && <span className="text-xs text-red-700">+{fcfa(d.penalty)} pénalité</span>}
+                  <span className="ml-auto"><StatusPill value={d.display_status} /></span>
+                </label>
+              ))}
+              {payable.length === 0 && <Empty text="Aucun jour impayé pour ce membre." testId="record-payment-days-empty" />}
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="rp-ref">Référence / numéro de transaction (optionnel)</Label>
+              <Input id="rp-ref" value={reference} onChange={(e) => setReference(e.target.value)} data-testid="record-payment-reference-input" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="rp-proof">Preuve de paiement (optionnel)</Label>
+              <Input
+                id="rp-proof"
+                type="file"
+                accept="image/png,image/jpeg,image/jpg,image/webp"
+                onChange={pickFile}
+                data-testid="record-payment-proof-input"
+              />
+              {proof && <p className="text-xs text-muted-foreground" data-testid="record-payment-proof-name">Jointe : {proof.name}</p>}
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="rp-note">Note interne (optionnel)</Label>
+              <Textarea id="rp-note" value={note} onChange={(e) => setNote(e.target.value)} data-testid="record-payment-note-input" />
+            </div>
+          </div>
+
+          <label className="mt-3 flex items-center gap-2 text-sm">
+            <Checkbox checked={validateNow} onCheckedChange={(v) => setValidateNow(Boolean(v))} data-testid="record-payment-validate-checkbox" />
+            Valider immédiatement (les jours passent en « payé » et un reçu est généré)
+          </label>
+
+          <div className="mt-4 rounded-xl border border-primary/25 bg-card p-3 text-sm">
+            <div className="flex justify-between"><span>Jours sélectionnés</span><span data-testid="record-payment-count">{chosen.length}</span></div>
+            <div className="flex justify-between"><span>Cotisations</span><span>{fcfa(contributions)}</span></div>
+            <div className="flex justify-between"><span>Pénalités</span><span>{fcfa(penalties)}</span></div>
+            <div className="mt-2 flex justify-between border-t border-primary/20 pt-2 font-heading text-lg">
+              <span>Total</span>
+              <span data-testid="record-payment-total">{fcfa(contributions + penalties)}</span>
+            </div>
+          </div>
+
+          <Button
+            className="mt-4 w-full"
+            disabled={selected.length === 0 || save.isPending}
+            onClick={() => save.mutate()}
+            data-testid="record-payment-submit-button"
+          >
+            {save.isPending ? "Enregistrement…" : "Enregistrer ce paiement"}
+          </Button>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1344,6 +1547,12 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                   <StatusPill value={p.status} />
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">{p.tontine_name} · {p.gerance_name} · {p.days.length} jour(s)</p>
+                {p.source && p.source.startsWith("saisie") && (
+                  <p className="mt-0.5 text-xs text-primary" data-testid={`payment-source-${p.id}`}>
+                    Saisie enregistrée par {byLabel(p.source)}
+                    {p.note ? ` — ${p.note}` : ""}
+                  </p>
+                )}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Button
                     size="sm"
@@ -1377,7 +1586,8 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
             {(payments.data ?? []).length === 0 && <Empty text="Aucun paiement." testId="staff-payments-empty" />}
           </TabsContent>
 
-          <TabsContent value="cotisations" className="mt-6 space-y-2" data-testid="staff-dues-list">
+          <TabsContent value="cotisations" className="mt-6 space-y-4" data-testid="staff-dues-list">
+            <RecordMemberPaymentCard tontines={myTontines.data ?? []} />
             <div className="flex flex-nowrap gap-2 overflow-x-auto no-scrollbar pb-1 md:flex-wrap" data-testid="due-filters">
               {DUE_FILTERS.map(([key, text]) => (
                 <Button
@@ -1512,7 +1722,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                 <p className="text-muted-foreground">{p.tontine_name} · {p.gerance_name} · position {p.position_index} · {p.payout_date} · confirmé par {p.confirmed_by_name}</p>
                 {p.source !== "confirmation" && (
                   <p className="mt-1 text-xs text-primary" data-testid={`payout-source-${p.id}`}>
-                    Historique enregistré par l'{p.source.replace("historique_", "")}
+                    Historique enregistré par {byLabel(p.source)}
                   </p>
                 )}
                 <a

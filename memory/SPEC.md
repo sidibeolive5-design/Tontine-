@@ -180,6 +180,25 @@ testid `tontine-edit-button-{id}`) → `EditTontineDialog`.
   statut, mode ou valeur invalide. Chaque modification est auditée (`tontine_updated`, avec l'impact)
   et notifie tous les membres actifs de la tontine.
 
+## Saisie d'un paiement par le responsable (pour un membre)
+Onglet « Cotisations » de `/gerance` et `/administration` → carte
+« Enregistrer un paiement pour un membre » (`record-member-payment-card`), pour un membre qui a payé
+sans envoyer sa preuve (espèces, dépôt direct, capture reçue par WhatsApp).
+- `POST /api/payments/for-member` (permission `verify_payments`, cloisonné par gérance) :
+  tontine + membre + jours cochés, moyen de paiement, **preuve image optionnelle** (base64),
+  référence, note interne, `validate_now`.
+  Montant toujours calculé côté serveur (jours × cotisation × branches + pénalités selon
+  `penalty_mode` et les jours de tolérance) — le responsable ne saisit jamais de montant.
+- `validate_now = true` → paiement `validated`, jours `paid`, `receipt_number` attribué
+  (reçu PDF immédiat) ; sinon paiement `pending`, jours `processing` à vérifier ensuite.
+- Le paiement porte `source = saisie_gérant` / `saisie_administrateur` + la note ; l'interface
+  affiche « Saisie enregistrée par le gérant / l'administrateur » — jamais confondu avec un envoi
+  Wave du membre. Le membre est notifié et l'opération est auditée
+  (`payment_recorded_for_member`).
+- `POST /api/payments/{id}/proof` (staff) permet d'attacher ou de remplacer la capture d'un paiement
+  existant. Refus : 409 sur des jours déjà payés/en vérification, 422 sur un membre hors tontine ou
+  des échéances invalides, 403 hors gérance / hors permission.
+
 ## Reçus PDF imprimables
 `lib/pdf.py` (reportlab) génère un reçu A4 à l'identité de la plateforme (nom, slogan, logo, contacts
 lus dans `platform_settings`), avec bandeau, tableau de détails, total encadré, zone de signatures

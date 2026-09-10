@@ -365,6 +365,8 @@ class PaymentOut(BaseModel):
     receipt_number: Optional[str] = None
     status: str
     proof_filename: str
+    source: str = "membre"
+    note: Optional[str] = None
     created_at: Any
     decided_at: Optional[Any] = None
     decided_by_name: Optional[str] = None
@@ -626,6 +628,156 @@ async def payout_receipt_pdf(payout_id: str, user: dict[str, Any] = Depends(curr
 async def _next_payout_receipt_number(gerance_id: str) -> str:
     seq = await db.payouts.count_documents({"gerance_id": gerance_id, "receipt_number": {"$ne": None}}) + 1
     return f"ANV-P-{now_utc().year}-{seq:05d}"
+
+
+async def _resolve_method(tontine: dict[str, Any], code: str) -> dict[str, Any]:
+    """Snapshot of the chosen method: gérance settings first, legacy Wave entry as fallback."""
+    query: dict[str, Any] = {"gerance_id": tontine["gerance_id"], "active": True}
+    selected = tontine.get("payment_method_ids")
+    if selected:
+        query["id"] = {"$in": selected}
+    configured = await db.payment_methods.find(query, {"_id": 0}).to_list(100)
+    if configured:
+        found = next((m for m in configured if m["code"] == code.lower()), None)
+        if not found:
+            raise HTTPException(status_code=400, detail="Ce moyen de paiement n'est pas disponible pour cette tontine")
+        return found
+    legacy = next((m for m in PAYMENT_METHODS if m["code"] == code), None)
+    if not legacy or not legacy["available"]:
+        raise HTTPException(status_code=400, detail="Ce moyen de paiement n'est pas encore disponible")
+    return {"name": legacy["label"], "code": legacy["code"], "number": WAVE_NUMBER}
+
+
+class StaffPaymentInput(BaseModel):
+    tontine_id: str
+    member_id: str
+    due_date_ids: list[str] = Field(min_length=1)
+    method: str = "wave"
+    proof_image: Optional[str] = None      # optional: the member may have paid in cash / by hand
+    proof_filename: str = "preuve.jpg"
+    reference: Optional[str] = None
+    note: Optional[str] = None
+    validate_now: bool = True
+
+
+@router.post("/payments/for-member", response_model=PaymentOut)
+async def record_payment_for_member(
+    payload: StaffPaymentInput, user: dict[str, Any] = Depends(require_staff)
+):
+    """A responsable records a payment (and its proof) on behalf of a member.
+
+    Never presented as a member's own Wave submission: `source = saisie_gérant` /
+    `saisie_administrateur`, and the operation is audited.
+    """
+    ensure_permission(user, "verify_payments")
+    tontine = await get_tontine(payload.tontine_id)
+    assert_gerance_access(user, tontine["gerance_id"])
+    member = await db.users.find_one({"id": payload.member_id}, {"_id": 0})
+    if not member:
+        raise HTTPException(status_code=404, detail="Membre introuvable")
+    if not await db.tontine_members.find_one(
+        {"tontine_id": tontine["id"], "member_id": payload.member_id}
+    ):
+        raise HTTPException(status_code=422, detail="Ce membre n'appartient pas à cette tontine")
+    chosen_method = await _resolve_method(tontine, payload.method)
+    dues = await db.contribution_due_dates.find(
+        {"id": {"$in": payload.due_date_ids}, "member_id": payload.member_id, "tontine_id": tontine["id"]},
+        {"_id": 0},
+    ).to_list(500)
+    if len(dues) != len(payload.due_date_ids):
+        raise HTTPException(status_code=422, detail="Certaines échéances sélectionnées sont invalides")
+    if any(d["status"] in ("paid", "processing") for d in dues):
+        raise HTTPException(status_code=409, detail="Certaines échéances sont déjà payées ou en cours de vérification")
+    today = today_iso()
+    grace = await _grace_for(tontine)
+    per_branch = tontine.get("penalty_mode") == "branch"
+    contribution_amount = sum(d["amount"] for d in dues)
+    penalty_total = sum(
+        penalty_amount(d, today, int(tontine.get("penalty_per_day", 500)), grace)
+        * (max(int(d.get("branches") or 1), 1) if per_branch else 1)
+        for d in dues
+    )
+    label = "administrateur" if user["role"] == "admin" else "gérant"
+    by = "l'administrateur" if label == "administrateur" else "le gérant"
+    receipt_number = None
+    if payload.validate_now:
+        seq = await db.payments.count_documents({"gerance_id": tontine["gerance_id"], "status": "validated"}) + 1
+        receipt_number = f"ANV-{now_utc().year}-{seq:05d}"
+    payment = {
+        "id": new_id(),
+        "tontine_id": tontine["id"],
+        "gerance_id": tontine["gerance_id"],
+        "member_id": payload.member_id,
+        "amount": contribution_amount + penalty_total,
+        "contribution_amount": contribution_amount,
+        "penalty_amount": penalty_total,
+        "days": sorted(d["date"] for d in dues),
+        "due_date_ids": payload.due_date_ids,
+        "method": payload.method,
+        "method_name": chosen_method["name"],
+        "method_number": chosen_method.get("number", ""),
+        "reference": payload.reference or "",
+        "status": "validated" if payload.validate_now else "pending",
+        "proof_image": payload.proof_image or "",
+        "proof_filename": payload.proof_filename if payload.proof_image else "",
+        "receipt_number": receipt_number,
+        "source": f"saisie_{label}",
+        "note": payload.note,
+        "created_at": now_utc(),
+        "decided_at": now_utc() if payload.validate_now else None,
+        "decided_by": user["id"] if payload.validate_now else None,
+    }
+    await db.payments.insert_one(payment)
+    await db.contribution_due_dates.update_many(
+        {"id": {"$in": payload.due_date_ids}},
+        {"$set": {
+            "status": "paid" if payload.validate_now else "processing",
+            "payment_id": payment["id"],
+            "source": f"saisie_{label}",
+            "paid_at": now_utc() if payload.validate_now else None,
+            "synced_at": now_utc(),
+        }},
+    )
+    await notify(
+        payload.member_id,
+        "Paiement enregistré par votre gérance ✅" if payload.validate_now else "Paiement enregistré — vérification en cours",
+        (
+            f"Saisie par {by} : un paiement de {payment['amount']} FCFA "
+            f"({len(payment['days'])} jour(s)) a été enregistré sur {tontine['name']}."
+            + (f" Reçu {receipt_number}." if receipt_number else " Il reste à vérifier.")
+        ),
+        tontine["gerance_id"],
+        tontine["id"],
+        "payment_recorded_by_staff",
+    )
+    await audit(user, "payment_recorded_for_member", "payment", payment["id"], tontine["gerance_id"],
+                {"member_id": payload.member_id, "days": payment["days"], "amount": payment["amount"],
+                 "validated": payload.validate_now, "with_proof": bool(payload.proof_image)})
+    payment.pop("_id", None)
+    return await _payment_out(payment)
+
+
+class ProofUpload(BaseModel):
+    proof_image: str = Field(min_length=10)
+    proof_filename: str = "preuve.jpg"
+
+
+@router.post("/payments/{payment_id}/proof", response_model=PaymentOut)
+async def attach_proof(payment_id: str, payload: ProofUpload, user: dict[str, Any] = Depends(require_staff)):
+    """Attach or replace the proof image of an existing payment (staff, own gérance)."""
+    ensure_permission(user, "verify_payments")
+    p = await db.payments.find_one({"id": payment_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Paiement introuvable")
+    assert_gerance_access(user, p["gerance_id"])
+    await db.payments.update_one(
+        {"id": payment_id},
+        {"$set": {"proof_image": payload.proof_image, "proof_filename": payload.proof_filename}},
+    )
+    await audit(user, "payment_proof_attached", "payment", payment_id, p["gerance_id"])
+    fresh = await db.payments.find_one({"id": payment_id}, {"_id": 0})
+    assert fresh is not None
+    return await _payment_out(fresh)
 
 
 class DecidePayment(BaseModel):
