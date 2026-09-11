@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { apiGet, apiPatch, apiPost, ApiError } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, ApiError } from "@/lib/api";
 import { useMe } from "@/lib/session";
 import {
   fcfa,
@@ -27,6 +27,7 @@ import {
   type Invitation,
   type Manager,
   type MemberRow,
+  type MemberFile,
   type PaymentProof,
   type MembershipRequest,
   type ArrearsExport,
@@ -1070,9 +1071,58 @@ function MembersPanel({ tontines }: { tontines: Tontine[] }) {
   const [mode, setMode] = useState<"direct" | "invite">("direct");
   const [f, setF] = useState({ first_name: "", last_name: "", phone: "", email: "", password: "", tontine_id: "" });
   const [hist, setHist] = useState({ tontine_id: "", member_id: "", up_to_date: new Date().toISOString().slice(0, 10) });
+  const [profileMemberId, setProfileMemberId] = useState<string | null>(null);
+  const [branchDraft, setBranchDraft] = useState<Record<string, number>>({});
+  const [positionDraft, setPositionDraft] = useState<Record<string, { position_id: string; branch_number: number }>>({});
+  const [memberDraft, setMemberDraft] = useState({ first_name: "", last_name: "", phone: "", email: "", address: "", extra_info: "" });
 
   const invitations = useQuery({ queryKey: ["invitations"], queryFn: () => apiGet<Invitation[]>("/invitations"), retry: false });
   const members = useQuery({ queryKey: ["members"], queryFn: () => apiGet<MemberRow[]>("/members"), retry: false });
+  const profile = useQuery({
+    queryKey: ["member-file", profileMemberId],
+    queryFn: () => apiGet<MemberFile>(`/members/${profileMemberId}/file`),
+    enabled: Boolean(profileMemberId),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (profile.data) {
+      setMemberDraft({
+        first_name: profile.data.first_name,
+        last_name: profile.data.last_name,
+        phone: profile.data.phone,
+        email: profile.data.email,
+        address: profile.data.address ?? "",
+        extra_info: profile.data.extra_info ?? "",
+      });
+    }
+  }, [profile.data]);
+
+  const updateMember = useMutation({
+    mutationFn: () => apiPatch<MemberFile>(`/members/${profileMemberId}`, memberDraft),
+    onSuccess: () => { toast.success("Informations du membre mises à jour"); qc.invalidateQueries({ queryKey: ["member-file", profileMemberId] }); qc.invalidateQueries({ queryKey: ["members"] }); },
+    onError: (e) => toast.error(detail(e, "Modification impossible")),
+  });
+
+  const disableMember = useMutation({
+    mutationFn: () => apiDelete<MemberFile>(`/members/${profileMemberId}`),
+    onSuccess: () => { toast.success("Compte membre désactivé, historique conservé"); qc.invalidateQueries(); setProfileMemberId(null); },
+    onError: (e) => toast.error(detail(e, "Désactivation impossible")),
+  });
+
+  const updateBranches = useMutation({
+    mutationFn: (v: { member_id: string; tontine_id: string; branches: number }) =>
+      apiPatch<MemberFile>(`/members/${v.member_id}/tontines/${v.tontine_id}`, { branches: v.branches }),
+    onSuccess: () => { toast.success("Branches mises à jour"); qc.invalidateQueries({ queryKey: ["member-file", profileMemberId] }); qc.invalidateQueries(); },
+    onError: (e) => toast.error(detail(e, "Modification des branches impossible")),
+  });
+
+  const updatePosition = useMutation({
+    mutationFn: (v: { member_id: string; position_id: string; branch_number: number }) =>
+      apiPatch<MemberFile>(`/members/${v.member_id}/positions`, { position_id: v.position_id, branch_number: v.branch_number }),
+    onSuccess: () => { toast.success("Prise mise à jour"); qc.invalidateQueries({ queryKey: ["member-file", profileMemberId] }); qc.invalidateQueries(); },
+    onError: (e) => toast.error(detail(e, "Modification de la prise impossible")),
+  });
 
   const reset = () => setF({ first_name: "", last_name: "", phone: "", email: "", password: "", tontine_id: "" });
 
@@ -1293,6 +1343,9 @@ function MembersPanel({ tontines }: { tontines: Tontine[] }) {
               <span className="text-xs text-muted-foreground">{m.tontine_count} tontine(s)</span>
               <span className="text-xs">Identité : {label(m.identity_status)}</span>
               <div className="ml-auto flex items-center gap-2">
+                  <Button size="xs" variant="outline" onClick={() => setProfileMemberId(m.id)} data-testid={`member-profile-${m.id}`}>
+                    Gérer branches et prises
+                  </Button>
                 <select
                   className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
                   defaultValue=""
@@ -1313,6 +1366,118 @@ function MembersPanel({ tontines }: { tontines: Tontine[] }) {
           {(members.data ?? []).length === 0 && <Empty text="Aucun membre dans cette gérance." testId="staff-members-empty" />}
         </div>
       </div>
+
+      <Dialog open={Boolean(profileMemberId)} onOpenChange={(open) => !open && setProfileMemberId(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Fiche membre : {profile.data ? `${profile.data.first_name} ${profile.data.last_name}` : "chargement"}</DialogTitle>
+          </DialogHeader>
+          {profile.isLoading && <p className="text-sm text-muted-foreground">Chargement de la fiche…</p>}
+          {profile.data && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">Même compte membre, plusieurs branches et prises possibles dans une même tontine.</p>
+              <div className="grid gap-3 rounded-xl border border-border/70 p-4 sm:grid-cols-2">
+                {([['first_name', 'Prénom'], ['last_name', 'Nom'], ['phone', 'Téléphone'], ['email', 'Email'], ['address', 'Adresse'], ['extra_info', 'Informations complémentaires']] as const).map(([key, text]) => (
+                  <div key={key} className="space-y-1">
+                    <Label htmlFor={`member-edit-${key}`}>{text}</Label>
+                    <Input
+                      id={`member-edit-${key}`}
+                      value={memberDraft[key]}
+                      onChange={(e) => setMemberDraft({ ...memberDraft, [key]: e.target.value })}
+                    />
+                  </div>
+                ))}
+                <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+                  <Button size="sm" onClick={() => updateMember.mutate()} disabled={updateMember.isPending}>Enregistrer les informations</Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={disableMember.isPending || profile.data.status === "disabled"}
+                    onClick={() => {
+                      if (window.confirm("Désactiver ce compte membre ? Les cotisations, paiements, prises et historiques seront conservés. Le membre ne pourra plus se connecter.")) {
+                        disableMember.mutate();
+                      }
+                    }}
+                  >
+                    {profile.data.status === "disabled" ? "Compte désactivé" : "Désactiver le compte"}
+                  </Button>
+                </div>
+              </div>
+              {profile.data.tontines.map((line) => {
+                const branchKey = `${profile.data!.id}:${line.tontine_id}`;
+                const positionState = positionDraft[branchKey] ?? {
+                  position_id: line.available_positions.find((p) => p.status === "open")?.id ?? "",
+                  branch_number: 1,
+                };
+                return (
+                  <div key={line.tontine_id} className="space-y-3 rounded-xl border border-border/70 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="font-medium">{line.tontine_name}</p>
+                        <p className="text-xs text-muted-foreground">{line.branches} branche(s) · {fcfa(line.daily_amount)} / jour / branche</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          className="w-20"
+                          type="number"
+                          min={1}
+                          value={String(branchDraft[branchKey] ?? line.branches)}
+                          onChange={(e) => setBranchDraft({ ...branchDraft, [branchKey]: Number(e.target.value) })}
+                          aria-label={`Nombre de branches pour ${line.tontine_name}`}
+                        />
+                        <Button size="xs" onClick={() => updateBranches.mutate({ member_id: profile.data!.id, tontine_id: line.tontine_id, branches: branchDraft[branchKey] ?? line.branches })}>
+                          Enregistrer branches
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      {line.positions.map((position) => (
+                        <div key={position.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-sm">
+                          <span>Prise {position.position_index} · {position.payout_date}</span>
+                          <select
+                            className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
+                            value={String(position.branch_number)}
+                            onChange={(e) => updatePosition.mutate({ member_id: profile.data!.id, position_id: position.id, branch_number: Number(e.target.value) })}
+                          >
+                            {Array.from({ length: line.branches }, (_, i) => i + 1).map((branch) => <option key={branch} value={branch}>Branche {branch}</option>)}
+                          </select>
+                          <span className="text-xs text-muted-foreground">{position.status}</span>
+                        </div>
+                      ))}
+                      {line.positions.length === 0 && <p className="text-sm text-muted-foreground">Aucune prise attribuée.</p>}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
+                      <span className="text-sm font-medium">Ajouter une prise</span>
+                      <select
+                        className="h-8 min-w-44 rounded-lg border border-input bg-background px-2 text-xs"
+                        value={positionState.position_id}
+                        onChange={(e) => setPositionDraft({ ...positionDraft, [branchKey]: { ...positionState, position_id: e.target.value } })}
+                      >
+                        <option value="">Choisir une prise libre…</option>
+                        {line.available_positions.filter((p) => p.status === "open").map((p) => <option key={p.id} value={p.id}>Prise {p.position_index} · {p.payout_date}</option>)}
+                      </select>
+                      <select
+                        className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
+                        value={String(positionState.branch_number)}
+                        onChange={(e) => setPositionDraft({ ...positionDraft, [branchKey]: { ...positionState, branch_number: Number(e.target.value) } })}
+                      >
+                        {Array.from({ length: line.branches }, (_, i) => i + 1).map((branch) => <option key={branch} value={branch}>Branche {branch}</option>)}
+                      </select>
+                      <Button
+                        size="xs"
+                        disabled={!positionState.position_id || updatePosition.isPending}
+                        onClick={() => updatePosition.mutate({ member_id: profile.data!.id, position_id: positionState.position_id, branch_number: positionState.branch_number })}
+                      >
+                        Ajouter la prise
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

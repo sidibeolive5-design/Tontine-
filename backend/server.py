@@ -65,7 +65,9 @@ from routers import cron as cron_router  # noqa: E402
 from routers import finance as finance_router  # noqa: E402
 from routers import gerances as gerances_router  # noqa: E402
 from routers import members as members_router  # noqa: E402
+from routers import member_files as member_files_router  # noqa: E402
 from routers import notifications as notifications_router  # noqa: E402
+from routers import reports as reports_router  # noqa: E402
 from routers import settings as settings_router  # noqa: E402
 from routers import tontines as tontines_router  # noqa: E402
 
@@ -74,6 +76,8 @@ api_router.include_router(gerances_router.router, tags=["gerances"])
 api_router.include_router(settings_router.router, tags=["settings"])
 api_router.include_router(tontines_router.router, tags=["tontines"])
 api_router.include_router(members_router.router, tags=["members"])
+api_router.include_router(member_files_router.router, tags=["member-files"])
+api_router.include_router(reports_router.router, tags=["reports"])
 api_router.include_router(finance_router.router, tags=["finance"])
 api_router.include_router(notifications_router.router, tags=["notifications"])
 api_router.include_router(cron_router.router, tags=["cron"])

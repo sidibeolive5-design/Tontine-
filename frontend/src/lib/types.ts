@@ -277,6 +277,38 @@ export interface MemberRow {
   tontine_count: number;
 }
 
+export interface MemberFilePosition {
+  id: string;
+  position_index: number;
+  payout_date: string;
+  branch_number: number;
+  status: string;
+}
+
+export interface MemberFileTontine {
+  tontine_id: string;
+  tontine_name: string;
+  branches: number;
+  daily_amount: number;
+  position_index: number | null;
+  payout_date: string | null;
+  positions: MemberFilePosition[];
+  available_positions: MemberFilePosition[];
+  contract_status: string | null;
+}
+
+export interface MemberFile {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  status: string;
+  address: string | null;
+  extra_info: string | null;
+  tontines: MemberFileTontine[];
+}
+
 export interface AuditRow {
   id: string;
   actor_name: string;

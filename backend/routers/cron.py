@@ -12,7 +12,7 @@ from lib.db import db
 
 router = APIRouter()
 
-Slot = Literal["morning", "evening"]
+Slot = Literal["morning", "evening", "weekly"]
 
 
 def _authorise(authorization: str | None) -> None:
@@ -98,6 +98,40 @@ async def _send_reminders(run_id: str, slot: Slot) -> None:
         )
 
 
+async def _send_weekly_reports(run_id: str) -> None:
+    """Monday morning: one report per gérance, to its owner (in-app + email if configured)."""
+    from routers.reports import build_weekly_report, report_message
+
+    today = today_iso()
+    async for gerance in db.gerances.find({}, {"_id": 0}):
+        owner_id = gerance.get("owner_id")
+        if not owner_id:
+            continue
+        marker = f"weekly:{gerance['id']}:{today}"
+        if await db.notification_deliveries.find_one({"dedupe_key": marker}):
+            continue
+        report = await build_weekly_report(gerance["id"])
+        message = report_message(report)
+        await notify(
+            owner_id,
+            "Bilan hebdomadaire de votre gérance",
+            message,
+            gerance["id"],
+            None,
+            "weekly_report",
+        )
+        await db.notification_deliveries.update_one(
+            {"dedupe_key": marker},
+            {"$set": {
+                "id": new_id(), "dedupe_key": marker, "user_id": owner_id,
+                "gerance_id": gerance["id"], "tontine_id": None, "event": "weekly_report",
+                "channel": "in_app", "message": message, "status": "delivered", "error": None,
+                "attempts": 1, "run_id": run_id, "created_at": now_utc(),
+            }},
+            upsert=True,
+        )
+
+
 async def _accept(request: Request, background: BackgroundTasks, authorization: str | None, slot: Slot) -> dict[str, Any]:
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     _authorise(authorization)
@@ -113,7 +147,8 @@ async def _accept(request: Request, background: BackgroundTasks, authorization: 
     await db.cron_runs.insert_one(
         {"id": new_id(), "run_id": run_id, "job": slot, "created_at": now_utc()}
     )
-    background.add_task(_send_reminders, run_id, slot)
+    background.add_task(_send_weekly_reports if slot == "weekly" else _send_reminders,
+                        *( (run_id,) if slot == "weekly" else (run_id, slot) ))
     return {"accepted": True, "run_id": run_id, "slot": slot}
 
 
@@ -133,3 +168,12 @@ async def evening_reminders(
     authorization: str | None = Header(default=None),
 ):
     return await _accept(request, background, authorization, "evening")
+
+
+@router.post("/cron/weekly-report")
+async def weekly_report_cron(
+    request: Request,
+    background: BackgroundTasks,
+    authorization: str | None = Header(default=None),
+):
+    return await _accept(request, background, authorization, "weekly")

@@ -10,7 +10,7 @@ const PILLARS = [
   { icon: ShieldCheck, title: "Chaque gérance est étanche", text: "Une tontine appartient à une seule gérance. Aucune donnée ne traverse d'une gérance à l'autre." },
   { icon: Receipt, title: "Preuve avant validation", text: "Un paiement Wave n'est jamais confirmé automatiquement : un responsable vérifie la capture réelle." },
   { icon: CalendarClock, title: "Un calendrier unique", text: "Toutes les échéances viennent d'une source centrale : membre, gérant et administrateur voient la même chose." },
-  { icon: Users, title: "Positions maîtrisées", text: "Dates générées automatiquement, attribution manuelle, impossible d'occuper deux positions." },
+  { icon: Users, title: "Branches et prises maîtrisées", text: "Un même membre peut gérer plusieurs branches et prises, chacune suivie séparément." },
 ];
 
 export default function Home() {
@@ -56,7 +56,7 @@ export default function Home() {
             <ul className="mt-5 space-y-3 text-sm">
               {[
                 ["50 000 FCFA", "tous les 5 jours"],
-                ["20 membres", "une position chacun"],
+                ["20 membres", "branches et prises suivies"],
                 ["20 bénéficiaires", "dates fixées d'avance"],
                 ["100 jours", "durée totale"],
               ].map(([a, b]) => (

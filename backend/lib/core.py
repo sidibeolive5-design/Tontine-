@@ -58,6 +58,20 @@ async def notify(
             "created_at": now_utc(),
         }
     )
+    # Same notification by email for the events that matter (no-op if Resend isn't configured).
+    from lib.mailer import EMAIL_EVENTS, send_email
+
+    if event in EMAIL_EVENTS:
+        user = await db.users.find_one({"id": user_id}, {"_id": 0, "email": 1})
+        await send_email(
+            (user or {}).get("email", ""),
+            title,
+            message,
+            user_id=user_id,
+            gerance_id=gerance_id,
+            tontine_id=tontine_id,
+            event=event,
+        )
 
 
 async def audit(actor: dict[str, Any], action: str, entity: str, entity_id: str, gerance_id: Optional[str] = None,

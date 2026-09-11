@@ -90,6 +90,7 @@ class PositionOut(BaseModel):
     payout_date: str
     member_id: Optional[str] = None
     member_name: Optional[str] = None
+    branch_number: int = 1
     status: str
 
 
@@ -399,6 +400,7 @@ async def list_positions(tontine_id: str, _: Optional[dict[str, Any]] = Depends(
 
 class AssignInput(BaseModel):
     member_id: Optional[str] = None
+    branch_number: int = Field(default=1, ge=1)
 
 
 @router.patch("/positions/{position_id}/assign", response_model=PositionOut)
@@ -409,17 +411,26 @@ async def assign_position(position_id: str, payload: AssignInput, user: dict[str
         raise HTTPException(status_code=404, detail="Position introuvable")
     assert_gerance_access(user, pos["gerance_id"])
     if payload.member_id:
-        clash = await db.positions.find_one(
-            {"tontine_id": pos["tontine_id"], "member_id": payload.member_id, "id": {"$ne": position_id}}
-        )
-        if clash:
-            raise HTTPException(status_code=409, detail="Ce membre occupe déjà une position dans cette tontine")
         member = await db.tontine_members.find_one({"tontine_id": pos["tontine_id"], "member_id": payload.member_id})
         if not member:
             raise HTTPException(status_code=422, detail="Ce membre n'appartient pas à cette tontine")
+        branches = max(int(member.get("branches") or 1), 1)
+        if payload.branch_number > branches:
+            raise HTTPException(status_code=422, detail=f"Ce membre ne possède que {branches} branche(s) dans cette tontine")
+        clash_query: dict[str, Any] = {
+            "tontine_id": pos["tontine_id"], "member_id": payload.member_id, "id": {"$ne": position_id},
+        }
+        if payload.branch_number == 1:
+            clash_query["$or"] = [{"branch_number": 1}, {"branch_number": {"$exists": False}}]
+        else:
+            clash_query["branch_number"] = payload.branch_number
+        clash = await db.positions.find_one(clash_query)
+        if clash:
+            raise HTTPException(status_code=409, detail="Cette branche a déjà une prise attribuée à ce membre")
     await db.positions.update_one(
         {"id": position_id},
-        {"$set": {"member_id": payload.member_id, "status": "assigned" if payload.member_id else "open"}},
+        {"$set": {"member_id": payload.member_id, "branch_number": payload.branch_number if payload.member_id else 1,
+                   "status": "assigned" if payload.member_id else "open"}},
     )
     await audit(user, "position_assigned", "position", position_id, pos["gerance_id"], {"member_id": payload.member_id})
     if payload.member_id:
@@ -702,6 +713,7 @@ class MyTontineOut(BaseModel):
     daily_total: int = 0
     position_index: Optional[int] = None
     payout_date: Optional[str] = None
+    positions: list[dict[str, Any]] = []
     contract_status: Optional[str] = None
 
 
@@ -713,7 +725,8 @@ async def my_tontines(user: dict[str, Any] = Depends(current_user)):
         t = await db.tontines.find_one({"id": r["tontine_id"]}, {"_id": 0})
         if not t:
             continue
-        pos = await db.positions.find_one({"tontine_id": t["id"], "member_id": user["id"]}, {"_id": 0})
+        positions = await db.positions.find({"tontine_id": t["id"], "member_id": user["id"]}, {"_id": 0}).sort("index", 1).to_list(200)
+        pos = positions[0] if positions else None
         contract = await db.contracts.find_one({"tontine_id": t["id"], "member_id": user["id"]}, {"_id": 0})
         out.append(
             MyTontineOut(
@@ -723,6 +736,9 @@ async def my_tontines(user: dict[str, Any] = Depends(current_user)):
                 daily_total=int(t["daily_amount"]) * max(int(r.get("branches") or 1), 1),
                 position_index=pos["index"] if pos else None,
                 payout_date=pos["payout_date"] if pos else None,
+                positions=[{"position_index": p["index"], "payout_date": p["payout_date"],
+                            "branch_number": int(p.get("branch_number") or 1), "status": p.get("status", "assigned")}
+                           for p in positions],
                 contract_status=contract["status"] if contract else None,
             )
         )
@@ -745,6 +761,9 @@ async def tontine_members(tontine_id: str, user: dict[str, Any] = Depends(requir
                 "status": r["status"],
                 "branches": max(int(r.get("branches") or 1), 1),
                 "joined_at": r["joined_at"],
+                "positions": [{"position_index": p["index"], "payout_date": p["payout_date"],
+                               "branch_number": int(p.get("branch_number") or 1), "status": p.get("status", "assigned")}
+                              for p in await db.positions.find({"tontine_id": tontine_id, "member_id": r["member_id"]}, {"_id": 0}).sort("index", 1).to_list(200)],
             }
         )
     return out

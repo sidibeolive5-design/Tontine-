@@ -267,7 +267,7 @@ const CONTENT: Record<string, { title: string; blocks: [string, string][] }> = {
       ["Heure limite quotidienne", "Chaque échéance a une heure limite. Passée cette heure, le jour est compté en retard."],
       ["Pénalités", "Par défaut 500 FCFA par jour de retard, ajoutés automatiquement au montant à payer."],
       ["Preuve obligatoire", "Aucun paiement n'est validé sans preuve vérifiée par un responsable autorisé."],
-      ["Une position par membre", "Un membre ne peut pas occuper deux positions dans la même tontine."],
+      ["Plusieurs prises par membre", "Un même membre peut avoir plusieurs branches, chacune associée à sa prise."],
       ["Reçu après confirmation réelle", "Le reçu de prise n'est généré qu'après confirmation de la remise effective."],
     ],
   },
