@@ -10,7 +10,7 @@ import { label } from "@/lib/types";
 export function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <Link to="/" className="flex items-center gap-2.5 group" data-testid="brand-link">
-      <span className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground font-heading text-lg transition-transform duration-300 group-hover:scale-105">
+      <span className="pagne-diamonds grid size-10 place-items-center rounded-full border-2 border-[#E39A2D] bg-[#B34A24] bg-blend-multiply font-heading text-lg text-white ring-2 ring-[#F3E2C8] transition-transform duration-300 group-hover:scale-105">
         A
       </span>
       {!compact && (
@@ -47,7 +47,7 @@ export function PublicLayout({ children, hasBottomBar = false }: { children: Rea
 
   return (
     <div className={`min-h-screen flex flex-col ${hasBottomBar ? "pb-[4.5rem] md:pb-0" : ""}`}>
-      <header className="sticky top-0 z-30 border-b border-border/70 bg-background/90 backdrop-blur-xl">
+      <header className="header-ribbon sticky top-0 z-30 border-b border-border bg-background/95 pb-2 backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3 md:gap-6 md:px-5 md:py-3.5">
           <Brand />
           <nav className="hidden md:flex items-center gap-1 text-sm">
@@ -101,7 +101,7 @@ export function PublicLayout({ children, hasBottomBar = false }: { children: Rea
               >
                 <Menu className="size-5" />
               </SheetTrigger>
-              <SheetContent side="right" showCloseButton={false} className="w-[86vw] max-w-sm p-0">
+              <SheetContent side="right" showCloseButton={false} className="w-[86vw] max-w-sm border-l-[5px] border-l-[#E39A2D] p-0">
                 <div className="flex items-center justify-between border-b border-border/70 px-5 py-4">
                   <SheetTitle className="font-heading text-lg">Menu</SheetTitle>
                   <Button size="icon-sm" variant="ghost" onClick={() => setMenuOpen(false)} aria-label="Fermer" data-testid="mobile-menu-close">
@@ -112,7 +112,7 @@ export function PublicLayout({ children, hasBottomBar = false }: { children: Rea
                   {me && (
                     <div className="mb-4 rounded-xl bg-primary/8 p-4">
                       <div className="flex items-center gap-3">
-                        <span className="grid size-10 place-items-center rounded-full bg-primary font-heading text-lg text-primary-foreground">{me.first_name.charAt(0).toUpperCase()}</span>
+                        <span className="pagne-diamonds grid size-10 place-items-center rounded-full border-2 border-white bg-primary bg-blend-multiply font-heading text-lg text-white ring-2 ring-[#E39A2D]">{me.first_name.charAt(0).toUpperCase()}</span>
                         <div className="min-w-0"><p className="truncate font-medium">{me.first_name} {me.last_name}</p><p className="text-[0.68rem] font-semibold tracking-[0.12em] text-primary">{roleText}</p></div>
                       </div>
                       <Link to={space} onClick={() => setMenuOpen(false)} className="mt-3 flex min-h-11 items-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground" data-testid="mobile-menu-space-link">
@@ -131,7 +131,7 @@ export function PublicLayout({ children, hasBottomBar = false }: { children: Rea
                   {me ? (
                     <button
                       onClick={logout}
-                      className="mt-3 min-h-11 border-t border-border/70 px-4 py-4 text-left text-red-700 active:bg-red-50"
+                      className="mt-3 min-h-11 border-t border-border/70 px-4 py-4 text-left text-[#B3362B] active:bg-[#F6DAD5]"
                       data-testid="mobile-menu-logout-button"
                     >
                       Déconnexion
@@ -235,7 +235,7 @@ export function BottomBar({
                 active ? "text-primary" : "text-muted-foreground"
               }`}
             >
-              <span className={`grid size-8 place-items-center rounded-xl transition-colors duration-200 ${active ? "bg-primary/12" : ""}`}>
+              <span className={`grid size-8 place-items-center rounded-full transition-colors duration-200 ${active ? "bg-secondary" : ""}`}>
                 <it.icon className="size-[1.15rem]" />
               </span>
               <span className="leading-none">{it.text}</span>
@@ -285,19 +285,19 @@ export function BottomBar({
   );
 }
 
-const TONE: Record<string, string> = {  paid: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  validated: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  signed: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  accepted: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  received: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  verified: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  active: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  late: "bg-red-100 text-red-800 border-red-200",
-  rejected: "bg-red-100 text-red-800 border-red-200",
-  processing: "bg-amber-100 text-amber-900 border-amber-200",
-  pending: "bg-amber-100 text-amber-900 border-amber-200",
-  due_today: "bg-primary/12 text-primary border-primary/25",
-  to_sign: "bg-primary/12 text-primary border-primary/25",
+const TONE: Record<string, string> = {  paid: "bg-[#E5F1E7] text-[#2E7D46] border-[#A8D0B0]",
+  validated: "bg-[#E5F1E7] text-[#2E7D46] border-[#A8D0B0]",
+  signed: "bg-[#E5F1E7] text-[#2E7D46] border-[#A8D0B0]",
+  accepted: "bg-[#E5F1E7] text-[#2E7D46] border-[#A8D0B0]",
+  received: "bg-[#E5F1E7] text-[#2E7D46] border-[#A8D0B0]",
+  verified: "bg-[#E5F1E7] text-[#2E7D46] border-[#A8D0B0]",
+  active: "bg-[#E5F1E7] text-[#2E7D46] border-[#A8D0B0]",
+  late: "bg-[#F6DAD5] text-[#B3362B] border-[#E7AAA1]",
+  rejected: "bg-[#F6DAD5] text-[#B3362B] border-[#E7AAA1]",
+  processing: "bg-[#F3E2C8] text-[#9A6210] border-[#E39A2D]",
+  pending: "bg-[#F3E2C8] text-[#9A6210] border-[#E39A2D]",
+  due_today: "bg-[#F3E2C8] text-[#9A6210] border-[#E39A2D]",
+  to_sign: "bg-[#F3E2C8] text-[#9A6210] border-[#E39A2D]",
 };
 
 export function StatusPill({ value, testId }: { value: string; testId?: string }) {

@@ -761,7 +761,7 @@ function RecordMemberPaymentCard({ tontines }: { tontines: Tontine[] }) {
                   />
                   <span className="font-medium">{d.date}</span>
                   <span>{fcfa(d.amount)}</span>
-                  {d.penalty > 0 && <span className="text-xs text-red-700">+{fcfa(d.penalty)} pénalité</span>}
+                  {d.penalty > 0 && <span className="text-xs text-[#B3362B]">+{fcfa(d.penalty)} pénalité</span>}
                   <span className="ml-auto"><StatusPill value={d.display_status} /></span>
                 </label>
               ))}
@@ -1695,7 +1695,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
           </div>
 
           <TabsContent value="dashboard" className="mt-5 space-y-5">
-            {lateMemberCount > 0 && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm"><span>⏰ {lateMemberCount} membre{lateMemberCount > 1 ? "s" : ""} en retard sur {lateTontineCount} tontine{lateTontineCount > 1 ? "s" : ""} — relances suggérées aujourd'hui</span><Button size="sm" onClick={() => setRemindTarget(lateRows[0])}>Relancer</Button></div>}
+            {lateMemberCount > 0 && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#EFC99B] border-l-4 border-l-[#B3362B] bg-[#FBE8D8] px-4 py-3 text-sm text-[#7A4A12]"><span>⏰ {lateMemberCount} membre{lateMemberCount > 1 ? "s" : ""} en retard sur {lateTontineCount} tontine{lateTontineCount > 1 ? "s" : ""} — relances suggérées aujourd'hui</span><Button size="sm" variant="destructive" onClick={() => setRemindTarget(lateRows[0])}>Relancer</Button></div>}
             <div className="flex items-end justify-between gap-4">
               <div>
                 <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Bonjour, {me?.first_name ?? ""}</p>
@@ -1709,7 +1709,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                 <p className="tabular-nums mt-2 font-heading text-4xl text-primary md:text-5xl" data-testid="stat-paid">{fcfa(collected)}</p>
                 <p className="mt-2 text-sm text-muted-foreground">Sur l’ensemble de vos tontines</p>
                 <p className="tabular-nums mt-4 text-sm font-medium">{collectedPercent} % du total attendu</p>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-primary/10"><div className="h-full rounded-full bg-primary" style={{ width: `${collectedPercent}%` }} /></div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#F3E2C8]"><div className="h-full rounded-full bg-[#2E7D46]" style={{ width: `${collectedPercent}%` }} /></div>
                 <p className="mt-2 text-xs text-muted-foreground">Reste à encaisser : <span className="tabular-nums font-medium text-foreground">{fcfa(remaining)}</span> · Pénalités : <span className="tabular-nums font-medium text-foreground">{fcfa(g?.total_penalties ?? 0)}</span></p>
                 {unallocated > 0 && <p className="mt-1 text-xs text-muted-foreground">Écart à répartir : <span className="tabular-nums font-medium text-foreground">{fcfa(unallocated)}</span></p>}
               </div>
@@ -1724,7 +1724,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
               <Stat title="Demandes en attente" value={String(pendingMemberships + pendingManagers)} testId="stat-pending-requests" />
               <Stat title="Pénalités" value={fcfa(g?.total_penalties ?? 0)} testId="stat-penalties" />
             </div>
-            <section className="rounded-xl border border-primary/20 bg-primary/5 p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Aujourd'hui</p><p className="mt-1 font-medium">Cotisations du jour : {todaysPaid}/{todaysDues.length} reçues</p></div><button className="min-h-11 text-sm font-medium text-primary hover:underline" onClick={() => setTab("cotisations")}>Voir les manquants →</button></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-primary/10"><div className="h-full rounded-full bg-primary" style={{ width: todaysDues.length ? `${Math.round((todaysPaid / todaysDues.length) * 100)}%` : "0%" }} /></div></section>
+            <section className="rounded-[20px] border border-[#E39A2D] bg-[#F6E7CF] p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#9A6210]">Aujourd'hui</p><p className="mt-1 font-medium">Cotisations du jour : {todaysPaid}/{todaysDues.length} reçues</p></div><button className="min-h-11 text-sm font-medium text-primary hover:underline" onClick={() => setTab("cotisations")}>Voir les manquants →</button></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-[#F3E2C8]"><div className="h-full rounded-full bg-[#2E7D46]" style={{ width: todaysDues.length ? `${Math.round((todaysPaid / todaysDues.length) * 100)}%` : "0%" }} /></div></section>
           </TabsContent>
 
           <TabsContent value="ma-gerance" className="mt-6 space-y-6">
@@ -1911,7 +1911,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                 </div>
                 <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                   <span className="truncate">{d.tontine_name}</span>
-                  {d.penalty > 0 && <span className="text-red-700">+{fcfa(d.penalty)} pénalité</span>}
+                  {d.penalty > 0 && <span className="text-[#B3362B]">+{fcfa(d.penalty)} pénalité</span>}
                 </p>
               </div>
             ))}
@@ -1993,7 +1993,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                 </p>
                 <p className="mt-1 flex flex-wrap gap-x-3 text-xs">
                   <span>{a.late_days} jour(s) impayé(s) : {fcfa(a.late_amount)}</span>
-                  <span className="text-red-700">pénalités {fcfa(a.penalties)}</span>
+                  <span className="text-[#B3362B]">pénalités {fcfa(a.penalties)}</span>
                   <span className="text-muted-foreground">le plus ancien : {a.oldest_unpaid}</span>
                   <span className="text-muted-foreground">{a.paid_days}/{a.total_days} jours payés</span>
                 </p>

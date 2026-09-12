@@ -179,7 +179,7 @@ function PayDialogSection({ dues, methods }: { dues: DueDate[]; methods?: Paymen
                 </span>
                 <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                   <span className="truncate">{d.tontine_name}</span>
-                  {d.penalty > 0 && <span className="text-red-700">+{fcfa(d.penalty)} pénalité</span>}
+                  {d.penalty > 0 && <span className="text-[#B3362B]">+{fcfa(d.penalty)} pénalité</span>}
                 </span>
               </span>
             </label>
@@ -287,7 +287,7 @@ function PayDialogSection({ dues, methods }: { dues: DueDate[]; methods?: Paymen
         >
           {submit.isPending ? "Envoi…" : "Envoyer ma preuve"}
         </Button>
-        {multiTontine && <p className="mt-2 text-xs text-red-700">Sélectionnez des jours d'une seule tontine à la fois.</p>}
+        {multiTontine && <p className="mt-2 text-xs text-[#B3362B]">Sélectionnez des jours d'une seule tontine à la fois.</p>}
       </div>
     </div>
   );
@@ -438,7 +438,7 @@ export default function MemberSpace() {
                 <span className="text-muted-foreground">{p.tontine_name}</span>
                 <span className="text-xs text-muted-foreground">{p.days.length} jour(s){p.method_name ? ` · ${p.method_name}` : ""}</span>
                 {p.receipt_number && <span className="text-xs text-primary" data-testid={`receipt-${p.id}`}>Reçu {p.receipt_number}</span>}
-                {p.penalty_amount > 0 && <span className="text-xs text-red-700">dont {fcfa(p.penalty_amount)} de pénalités</span>}
+                {p.penalty_amount > 0 && <span className="text-xs text-[#B3362B]">dont {fcfa(p.penalty_amount)} de pénalités</span>}
                 <span className="ml-auto"><StatusPill value={p.status} /></span>
                 {p.status === "validated" && (
                   <a
