@@ -48,6 +48,22 @@ export default function Home() {
               </Link>
             </div>
             <p className="mt-4 text-sm text-muted-foreground">La création du compte est gratuite.</p>
+            <div className="mt-8 grid gap-4 border-t border-border/70 pt-6 sm:grid-cols-2">
+              <div className="rounded-xl border border-border/60 bg-background/60 p-4">
+                <p className="font-heading text-lg">Espace membre</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Link to="/connexion" className={buttonVariants({ size: "sm" })}>Se connecter</Link>
+                  <Link to="/creer-mon-compte" className={buttonVariants({ size: "sm", variant: "outline" })}>Créer un compte</Link>
+                </div>
+              </div>
+              <div className="rounded-xl border border-primary/25 bg-primary/5 p-4">
+                <p className="font-heading text-lg">Vous êtes gérant ?</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Link to="/connexion" className={buttonVariants({ size: "sm" })}>Se connecter</Link>
+                  <Link to="/devenir-gerant" className={buttonVariants({ size: "sm", variant: "outline" })}>Créer un compte gérant</Link>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="relative animate-rise rounded-3xl border border-border/70 bg-card/80 p-6 shadow-xl shadow-primary/5 backdrop-blur lg:mt-6">

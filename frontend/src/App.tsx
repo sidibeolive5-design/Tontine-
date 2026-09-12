@@ -1,7 +1,7 @@
 import { Routes, Route } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import Home from "@/pages/Home";
-import { Login, Register, Forgot } from "@/pages/Auth";
+import { Login, ManagerRegister, Register, Forgot } from "@/pages/Auth";
 import { AvailableTontines, TontineDetail, InfoPage } from "@/pages/Public";
 import MemberSpace from "@/pages/MemberSpace";
 import InvitationPage from "@/pages/Invitation";
@@ -21,6 +21,7 @@ export default function App() {
         <Route path="/politique-confidentialite" element={<InfoPage slug="politique-confidentialite" />} />
         <Route path="/connexion" element={<Login />} />
         <Route path="/creer-mon-compte" element={<Register />} />
+        <Route path="/devenir-gerant" element={<ManagerRegister />} />
         <Route path="/mot-de-passe-oublie" element={<Forgot />} />
         <Route path="/invitation" element={<InvitationPage />} />
         <Route path="/espace-membre" element={<MemberSpace />} />

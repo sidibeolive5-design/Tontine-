@@ -29,6 +29,19 @@ export interface Manager {
   tontine_count: number;
 }
 
+export interface ManagerRequest {
+  id: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+  organization_name: string;
+  reason: string;
+  status: "pending" | "accepted" | "rejected";
+  created_at: string;
+  decided_at: string | null;
+}
+
 export interface Gerance {
   id: string;
   name: string;

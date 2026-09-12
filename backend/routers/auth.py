@@ -31,6 +31,16 @@ class LoginInput(BaseModel):
     password: str
 
 
+class ManagerRequestInput(BaseModel):
+    first_name: str = Field(min_length=1)
+    last_name: str = Field(min_length=1)
+    phone: str = Field(min_length=6)
+    email: EmailStr
+    password: str = Field(min_length=6)
+    organization_name: str = Field(min_length=2)
+    reason: str = ""
+
+
 class ProfileInput(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -105,12 +115,39 @@ async def register(payload: RegisterInput, response: Response):
     return _out(user)
 
 
+@router.post("/manager-requests")
+async def request_manager_account(payload: ManagerRequestInput):
+    email = payload.email.lower()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=409, detail="Un compte existe déjà avec cet email")
+    if await db.manager_requests.find_one({"email": email, "status": "pending"}):
+        raise HTTPException(status_code=409, detail="Une demande est déjà en attente pour cet email")
+    request = {
+        "id": new_id(),
+        "first_name": payload.first_name.strip(),
+        "last_name": payload.last_name.strip(),
+        "phone": payload.phone.strip(),
+        "email": email,
+        "password_hash": hash_password(payload.password),
+        "organization_name": payload.organization_name.strip(),
+        "reason": payload.reason.strip(),
+        "status": "pending",
+        "created_at": now_utc(),
+        "decided_at": None,
+        "decided_by": None,
+    }
+    await db.manager_requests.insert_one(request)
+    request.pop("password_hash", None)
+    request.pop("_id", None)
+    return request
+
+
 @router.post("/auth/login", response_model=UserOut)
 async def login(payload: LoginInput, response: Response):
     user = await db.users.find_one({"email": payload.email.lower()})
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
-    if user.get("status") in ("suspended", "disabled", "trashed"):
+    if user.get("status") in ("suspended", "disabled", "trashed", "pending_manager", "rejected_manager"):
         raise HTTPException(status_code=403, detail="Ce compte est suspendu ou désactivé")
     set_session(response, user["id"])
     return _out(user)

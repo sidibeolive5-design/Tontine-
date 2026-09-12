@@ -148,3 +148,12 @@
     display: none;
     }
 }
+
+@layer components {
+  .compact-surface {
+    @apply rounded-xl border border-border/60 bg-card;
+  }
+  .dashboard-surface {
+    @apply rounded-2xl border border-border/60 bg-card;
+  }
+}

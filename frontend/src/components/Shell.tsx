@@ -211,10 +211,12 @@ export function BottomBar({
   items,
   value,
   onChange,
+  menuItems = [],
 }: {
   items: BottomItem[];
   value: string;
   onChange: (v: string) => void;
+  menuItems?: BottomItem[];
 }) {
   return (
     <nav
@@ -248,6 +250,39 @@ export function BottomBar({
             </button>
           );
         })}
+        {menuItems.length > 0 && (
+          <Sheet>
+            <SheetTrigger
+              className="relative flex flex-1 flex-col items-center gap-1 px-1 py-2.5 text-[0.68rem] text-muted-foreground"
+              aria-label="Ouvrir le menu"
+              data-testid="bottom-nav-menu"
+            >
+              <span className="grid size-8 place-items-center rounded-xl"><Menu className="size-[1.15rem]" /></span>
+              <span className="leading-none">Menu</span>
+              {menuItems.find((it) => it.value === "corbeille")?.badge ? (
+                <span className="absolute right-1/2 top-1 translate-x-4 rounded-full bg-primary px-1.5 text-[0.6rem] leading-4 text-primary-foreground">
+                  {menuItems.find((it) => it.value === "corbeille")?.badge}
+                </span>
+              ) : null}
+            </SheetTrigger>
+            <SheetContent side="bottom" className="rounded-t-2xl px-4 pb-8">
+              <SheetTitle className="mb-4 font-heading text-xl">Menu</SheetTitle>
+              <div className="grid grid-cols-2 gap-2">
+                {menuItems.map((it) => (
+                  <button
+                    key={it.value}
+                    className={`flex items-center gap-2 rounded-xl border px-3 py-3 text-left text-sm ${value === it.value ? "border-primary bg-primary/8 text-primary" : "border-border/70"}`}
+                    onClick={() => onChange(it.value)}
+                  >
+                    <it.icon className="size-4" />
+                    <span>{it.text}</span>
+                    {it.badge ? <span className="ml-auto rounded-full bg-primary px-1.5 text-xs text-primary-foreground">{it.badge}</span> : null}
+                  </button>
+                ))}
+              </div>
+            </SheetContent>
+          </Sheet>
+        )}
       </div>
     </nav>
   );

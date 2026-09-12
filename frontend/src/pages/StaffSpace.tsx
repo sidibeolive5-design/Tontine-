@@ -26,6 +26,7 @@ import {
   type ImportResult,
   type Invitation,
   type Manager,
+  type ManagerRequest,
   type MemberRow,
   type MemberFile,
   type TrashMember,
@@ -493,7 +494,7 @@ function TontineCard({ t }: { t: Tontine }) {
   });
 
   return (
-    <div className="rounded-2xl border border-border/70 bg-card p-5" data-testid={`tontine-card-${t.id}`}>
+    <div className="compact-surface p-4" data-testid={`tontine-card-${t.id}`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="font-heading text-xl">{t.name}</p>
@@ -506,7 +507,7 @@ function TontineCard({ t }: { t: Tontine }) {
         {" · "}{t.branches_used}/{t.total_branches ?? t.member_count} branches
         {t.allow_multi_branch ? ` · jusqu'à ${t.max_branches_per_member} branches/membre` : " · 1 branche/membre"}
       </p>
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap gap-2">
         <Button size="sm" variant="outline" onClick={() => setOpen((o) => !o)} data-testid={`tontine-positions-toggle-${t.id}`}>
           {open ? "Masquer les positions" : "Gérer les positions"}
         </Button>
@@ -1346,9 +1347,9 @@ function MembersPanel({ tontines, isAdmin }: { tontines: Tontine[]; isAdmin: boo
         </div>
       </div>
 
-      <div className="rounded-2xl border border-border/70 bg-card p-6">
+      <div className="compact-surface p-4 md:p-5">
         <h3 className="font-heading text-xl">Membres</h3>
-        <div className="mt-4 space-y-2" data-testid="staff-members-list">
+        <div className="mt-3 space-y-1.5" data-testid="staff-members-list">
           {(members.data ?? []).map((m) => (
             <div key={m.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 px-4 py-3 text-sm">
               <span className="font-medium">{m.first_name} {m.last_name}</span>
@@ -1591,6 +1592,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
   const myTontines = useQuery({ queryKey: ["tontines", "mine"], queryFn: () => apiGet<Tontine[]>("/tontines/mine"), retry: false });
   const gerances = useQuery({ queryKey: ["gerances"], queryFn: () => apiGet<Gerance[]>("/gerances"), enabled: isAdmin, retry: false });
   const managers = useQuery({ queryKey: ["managers"], queryFn: () => apiGet<Manager[]>("/managers"), enabled: isAdmin, retry: false });
+  const managerRequests = useQuery({ queryKey: ["manager-requests"], queryFn: () => apiGet<ManagerRequest[]>("/manager-requests"), enabled: isAdmin, retry: false });
   const requests = useQuery({ queryKey: ["memberships", "requests"], queryFn: () => apiGet<MembershipRequest[]>("/memberships/requests"), retry: false });
   const payments = useQuery({ queryKey: ["payments"], queryFn: () => apiGet<Payment[]>("/payments"), retry: false });
   const dues = useQuery({ queryKey: ["due-dates"], queryFn: () => apiGet<DueDate[]>("/due-dates"), retry: false });
@@ -1627,6 +1629,12 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
     onError: (e) => toast.error(detail(e, "Action impossible")),
   });
 
+  const decideManagerRequest = useMutation({
+    mutationFn: (v: { id: string; action: "accept" | "reject" }) => apiPost(`/manager-requests/${v.id}/decide`, { action: v.action }),
+    onSuccess: () => { toast.success("Demande de gérant traitée"); qc.invalidateQueries(); },
+    onError: (e) => toast.error(detail(e, "Traitement impossible")),
+  });
+
   if (!isLoading && (!me || (isAdmin ? me.role !== "admin" : me.role !== "manager"))) {
     return (
       <PublicLayout>
@@ -1660,6 +1668,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                         {isAdmin && <TabsTrigger value="corbeille" data-testid="tab-corbeille">Corbeille ({trashMembers.data?.length ?? 0})</TabsTrigger>}
             {isAdmin && <TabsTrigger value="supervision" data-testid="tab-supervision">Supervision des gérances</TabsTrigger>}
             {isAdmin && <TabsTrigger value="gerants" data-testid="tab-gerants">Gérants</TabsTrigger>}
+            {isAdmin && <TabsTrigger value="demandes-gerants" data-testid="tab-demandes-gerants">Demandes de gérants ({(managerRequests.data ?? []).filter((r) => r.status === "pending").length})</TabsTrigger>}
             <TabsTrigger value="demandes" data-testid="tab-demandes">Demandes d'adhésion</TabsTrigger>
             <TabsTrigger value="paiements" data-testid="tab-paiements">Paiements</TabsTrigger>
             <TabsTrigger value="cotisations" data-testid="tab-cotisations">Cotisations</TabsTrigger>
@@ -1670,23 +1679,51 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
             <TabsTrigger value="parametres" data-testid="tab-parametres">⚙️ Paramètres</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="dashboard" className="mt-6 space-y-6">
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Stat title="Tontines (ma gérance)" value={String(g?.tontine_count ?? 0)} testId="stat-tontines" />
-              <Stat title="Membres" value={String(g?.member_count ?? 0)} testId="stat-members" />
-              <Stat title="Total encaissé" value={fcfa(g?.total_paid ?? 0)} testId="stat-paid" />
-              <Stat title="Paiements à vérifier" value={String(pendingPayments.length)} testId="stat-pending-payments" />
+          <TabsContent value="dashboard" className="mt-5 space-y-5">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Bonjour, {me?.first_name ?? ""}</p>
+                <h2 className="mt-1 font-heading text-2xl md:text-3xl">Votre activité, en un coup d’œil</h2>
+              </div>
+              <span className="hidden text-sm text-muted-foreground sm:block">{g?.name ?? "Ma gérance"}</span>
             </div>
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <div className="dashboard-surface grid gap-4 p-5 md:grid-cols-[1.35fr_1fr] md:p-6">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Total encaissé</p>
+                <p className="mt-2 font-heading text-4xl text-primary md:text-5xl" data-testid="stat-paid">{fcfa(g?.total_paid ?? 0)}</p>
+                <p className="mt-2 text-sm text-muted-foreground">Sur l’ensemble de vos tontines</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 self-end">
+                <Stat title="Membres" value={String(g?.member_count ?? 0)} testId="stat-members" />
+                <Stat title="Tontines" value={String(g?.tontine_count ?? 0)} testId="stat-tontines" />
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
               <Stat title="Total attendu" value={fcfa(g?.total_expected ?? 0)} testId="stat-expected" />
               <Stat title="En attente" value={fcfa(g?.total_pending ?? 0)} testId="stat-pending" />
-              <Stat title="En retard" value={fcfa(g?.total_late ?? 0)} testId="stat-late" />
               <Stat title="Pénalités" value={fcfa(g?.total_penalties ?? 0)} testId="stat-penalties" />
             </div>
+            <section className="dashboard-surface p-4 md:p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div><p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">À vérifier</p><h3 className="mt-1 font-heading text-xl">Les actions qui attendent votre attention</h3></div>
+                <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">{pendingPayments.length + (requests.data ?? []).filter((r) => r.status === "pending").length + (arrears.data ?? []).length}</span>
+              </div>
+              <div className="mt-4 divide-y divide-border/60">
+                {[
+                  { label: "Paiements à vérifier", count: pendingPayments.length, tab: "paiements" },
+                  { label: "Demandes d’adhésion", count: (requests.data ?? []).filter((r) => r.status === "pending").length, tab: "demandes" },
+                  { label: "Membres en retard", count: (arrears.data ?? []).length, tab: "retards" },
+                ].map((item) => (
+                  <button key={item.tab} onClick={() => setTab(item.tab)} className="flex w-full items-center justify-between gap-3 py-3 text-left text-sm transition-colors hover:text-primary">
+                    <span>{item.label}</span><span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold">{item.count}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
           </TabsContent>
 
           <TabsContent value="ma-gerance" className="mt-6 space-y-6">
-            <div className="rounded-2xl border border-border/70 bg-card p-6">
+            <div className="compact-surface p-4 md:p-5">
               <h2 className="font-heading text-2xl">Créer une tontine</h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 Elle sera automatiquement rattachée à {g?.name ?? "votre gérance"}.
@@ -1712,7 +1749,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
           {isAdmin && (
             <TabsContent value="supervision" className="mt-6 grid gap-4 md:grid-cols-2" data-testid="supervision-list">
               {(gerances.data ?? []).map((x) => (
-                <div key={x.id} className="rounded-2xl border border-border/70 bg-card p-5" data-testid={`gerance-card-${x.id}`}>
+                <div key={x.id} className="compact-surface p-4" data-testid={`gerance-card-${x.id}`}>
                   <div className="flex items-center justify-between gap-3">
                     <p className="font-heading text-xl">{x.name}</p>
                     {x.is_admin_gerance && <StatusPill value="active" />}
@@ -1753,6 +1790,23 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
                 ))}
                 {(managers.data ?? []).length === 0 && <Empty text="Aucun gérant créé." testId="managers-empty" />}
               </div>
+            </TabsContent>
+          )}
+
+          {isAdmin && (
+            <TabsContent value="demandes-gerants" className="mt-6 space-y-3" data-testid="manager-requests-list">
+              {(managerRequests.data ?? []).map((r) => (
+                <div key={r.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-card px-4 py-3 text-sm">
+                  <div>
+                    <p className="font-medium">{r.first_name} {r.last_name} · {r.organization_name}</p>
+                    <p className="text-muted-foreground">{r.email} · {r.phone}</p>
+                    {r.reason && <p className="text-xs text-muted-foreground">{r.reason}</p>}
+                  </div>
+                  <StatusPill value={r.status} />
+                  {r.status === "pending" && <div className="ml-auto flex gap-2"><Button size="xs" onClick={() => decideManagerRequest.mutate({ id: r.id, action: "accept" })}>Accepter</Button><Button size="xs" variant="destructive" onClick={() => decideManagerRequest.mutate({ id: r.id, action: "reject" })}>Refuser</Button></div>}
+                </div>
+              ))}
+              {(managerRequests.data ?? []).length === 0 && <Empty text="Aucune demande de gérant." testId="manager-requests-empty" />}
             </TabsContent>
           )}
 
@@ -2014,8 +2068,22 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
           { value: "dashboard", text: "Accueil", icon: LayoutDashboard },
           { value: "ma-gerance", text: "Tontines", icon: Landmark },
           { value: "membres", text: "Membres", icon: UserPlus },
-                    ...(isAdmin ? [{ value: "corbeille", text: "Corbeille", icon: Trash2, badge: trashMembers.data?.length ?? 0 }] : []),
           { value: "paiements", text: "Paiements", icon: Wallet, badge: pendingPayments.length },
+        ]}
+        menuItems={[
+          ...(isAdmin ? [{ value: "corbeille", text: "Corbeille", icon: Trash2, badge: trashMembers.data?.length ?? 0 }] : []),
+          { value: "demandes", text: "Demandes d’adhésion", icon: UserPlus },
+          { value: "cotisations", text: "Cotisations", icon: Wallet },
+          { value: "retards", text: "Retards", icon: Wallet },
+          { value: "prises", text: "Prises", icon: Landmark },
+          { value: "notifications", text: "Notifications", icon: UserPlus },
+          { value: "audit", text: "Historique & audit", icon: LayoutDashboard },
+          { value: "parametres", text: "Paramètres", icon: LayoutDashboard },
+          ...(isAdmin ? [
+            { value: "supervision", text: "Supervision", icon: Landmark },
+            { value: "gerants", text: "Gérants", icon: UserPlus },
+            { value: "demandes-gerants", text: "Demandes de gérants", icon: UserPlus },
+          ] : []),
         ]}
       />
     </PublicLayout>

@@ -155,6 +155,42 @@ export function Register() {
   );
 }
 
+export function ManagerRegister() {
+  const navigate = useNavigate();
+  const [form, setForm] = useState({ first_name: "", last_name: "", phone: "", email: "", password: "", confirm: "", organization_name: "", reason: "" });
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+  const request = useMutation({
+    mutationFn: () => {
+      const { confirm: _confirm, ...payload } = form;
+      return apiPost<{ status: string }>("/manager-requests", payload);
+    },
+    onSuccess: () => { toast.success("Demande envoyée. Elle sera examinée par l’administrateur."); navigate("/"); },
+    onError: (e) => toast.error(errorText(e)),
+  });
+  return (
+    <PublicLayout>
+      <div className="mx-auto w-full max-w-2xl px-4 py-10 md:px-5 md:py-16">
+        <div className="rounded-3xl border border-border/70 bg-card p-6 shadow-xl shadow-primary/5 animate-rise md:p-8">
+          <Brand compact />
+          <h1 className="mt-6 font-heading text-3xl">Demande pour devenir gérant</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Votre accès gérant sera activé uniquement après validation par l’administrateur principal.</p>
+          <form className="mt-7 grid gap-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); if (form.password !== form.confirm) { toast.error("Les mots de passe ne correspondent pas"); return; } request.mutate(); }}>
+            {([['first_name', 'Prénom'], ['last_name', 'Nom'], ['phone', 'Téléphone'], ['email', 'Email'], ['organization_name', 'Nom de votre gérance']] as const).map(([key, text]) => (
+              <div key={key} className="space-y-2"><Label htmlFor={`manager-${key}`}>{text}</Label><Input id={`manager-${key}`} required value={form[key]} onChange={set(key)} /></div>
+            ))}
+            <div className="space-y-2"><Label htmlFor="manager-password">Mot de passe</Label><Input id="manager-password" type="password" minLength={6} required value={form.password} onChange={set("password")} /></div>
+            <div className="space-y-2"><Label htmlFor="manager-confirm">Confirmation</Label><Input id="manager-confirm" type="password" required value={form.confirm} onChange={set("confirm")} /></div>
+            <div className="space-y-2 sm:col-span-2"><Label htmlFor="manager-reason">Présentation ou motif</Label><Input id="manager-reason" value={form.reason} onChange={set("reason")} /></div>
+            <Button type="submit" className="sm:col-span-2" disabled={request.isPending}>{request.isPending ? "Envoi…" : "Envoyer ma demande"}</Button>
+          </form>
+          <p className="mt-5 text-sm text-muted-foreground">Déjà gérant ? <Link to="/connexion" className="text-primary hover:underline">Se connecter</Link></p>
+        </div>
+      </div>
+    </PublicLayout>
+  );
+}
+
 export function Forgot() {
   const [email, setEmail] = useState("");
   return (

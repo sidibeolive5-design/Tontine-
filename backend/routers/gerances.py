@@ -24,6 +24,10 @@ class ManagerUpdate(BaseModel):
     permissions: Optional[list[str]] = None
 
 
+class ManagerRequestDecision(BaseModel):
+    action: str = Field(pattern="^(accept|reject)$")
+
+
 class ManagerOut(BaseModel):
     id: str
     first_name: str
@@ -55,6 +59,49 @@ class GeranceOut(BaseModel):
 @router.get("/permissions", response_model=list[str])
 async def list_permissions(_: dict[str, Any] = Depends(require_staff)):
     return ALL_PERMISSIONS
+
+
+@router.get("/manager-requests")
+async def list_manager_requests(_: dict[str, Any] = Depends(require_admin)):
+    return await db.manager_requests.find({}, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(500)
+
+
+@router.post("/manager-requests/{request_id}/decide")
+async def decide_manager_request(request_id: str, payload: ManagerRequestDecision,
+                                 admin: dict[str, Any] = Depends(require_admin)):
+    request = await db.manager_requests.find_one({"id": request_id}, {"_id": 0})
+    if not request:
+        raise HTTPException(status_code=404, detail="Demande de gérance introuvable")
+    if request["status"] != "pending":
+        raise HTTPException(status_code=409, detail="Cette demande a déjà été traitée")
+    status = "accepted" if payload.action == "accept" else "rejected"
+    if status == "rejected":
+        await db.manager_requests.update_one({"id": request_id}, {"$set": {"status": status, "decided_at": now_utc(), "decided_by": admin["id"]}})
+        await audit(admin, "manager_request_rejected", "manager_request", request_id, admin.get("gerance_id"))
+        return {"id": request_id, "status": status}
+    if await db.users.find_one({"email": request["email"]}):
+        raise HTTPException(status_code=409, detail="Un compte existe déjà avec cet email")
+    gerance = {
+        "id": new_id(), "name": request["organization_name"], "owner_id": request_id,
+        "is_admin_gerance": False, "created_at": now_utc(),
+    }
+    manager_id = new_id()
+    user = {
+        "id": manager_id, "first_name": request["first_name"], "last_name": request["last_name"],
+        "phone": request["phone"], "email": request["email"], "password_hash": request["password_hash"],
+        "role": "manager", "status": "active", "gerance_id": gerance["id"],
+        "permissions": ALL_PERMISSIONS, "profile_complete": True, "identity_status": "verified",
+        "address": None, "extra_info": request.get("reason"), "created_at": now_utc(),
+    }
+    gerance["owner_id"] = manager_id
+    await db.gerances.insert_one(gerance)
+    await db.users.insert_one(user)
+    await db.manager_requests.update_one({"id": request_id}, {"$set": {
+        "status": status, "decided_at": now_utc(), "decided_by": admin["id"], "manager_id": manager_id, "gerance_id": gerance["id"],
+    }})
+    await audit(admin, "manager_request_accepted", "manager_request", request_id, gerance["id"])
+    await notify(manager_id, "Demande de gérance acceptée", f"Votre espace gérant « {gerance['name']} » est disponible.", gerance["id"], event="manager_request_accepted")
+    return {"id": request_id, "status": status, "manager_id": manager_id, "gerance_id": gerance["id"]}
 
 
 @router.post("/managers", response_model=ManagerOut)
