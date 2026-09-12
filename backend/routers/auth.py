@@ -110,7 +110,7 @@ async def login(payload: LoginInput, response: Response):
     user = await db.users.find_one({"email": payload.email.lower()})
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
-    if user.get("status") in ("suspended", "disabled"):
+    if user.get("status") in ("suspended", "disabled", "trashed"):
         raise HTTPException(status_code=403, detail="Ce compte est suspendu ou désactivé")
     set_session(response, user["id"])
     return _out(user)

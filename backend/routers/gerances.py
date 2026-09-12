@@ -186,7 +186,8 @@ async def list_gerances(_: dict[str, Any] = Depends(require_admin)):
     for g in sorted(gerances, key=lambda x: (not x["is_admin_gerance"], x["name"])):
         owner = await db.users.find_one({"id": g["owner_id"]}, {"_id": 0})
         tontines = await db.tontines.count_documents({"gerance_id": g["id"]})
-        members = len(await db.tontine_members.distinct("member_id", {"gerance_id": g["id"]}))
+        active_member_ids = await db.tontine_members.distinct("member_id", {"gerance_id": g["id"], "status": "active"})
+        members = await db.users.count_documents({"id": {"$in": active_member_ids}, "role": "member", "status": {"$ne": "trashed"}})
         out.append(
             GeranceOut(
                 id=g["id"],
@@ -220,12 +221,18 @@ async def my_gerance(user: dict[str, Any] = Depends(require_staff)):
     gerance = await db.gerances.find_one({"id": user.get("gerance_id")}, {"_id": 0})
     if not gerance:
         raise HTTPException(status_code=404, detail="Aucune gérance rattachée à ce compte")
+    active_member_ids = await db.tontine_members.distinct(
+        "member_id", {"gerance_id": gerance["id"], "status": "active"}
+    )
+    active_member_count = await db.users.count_documents(
+        {"id": {"$in": active_member_ids}, "role": "member", "status": {"$ne": "trashed"}}
+    )
     return MyGeranceOut(
         id=gerance["id"],
         name=gerance["name"],
         is_admin_gerance=gerance["is_admin_gerance"],
         tontine_count=await db.tontines.count_documents({"gerance_id": gerance["id"]}),
-        member_count=len(await db.tontine_members.distinct("member_id", {"gerance_id": gerance["id"]})),
+        member_count=active_member_count,
         **(await _gerance_stats(gerance["id"])),
     )
 
@@ -237,6 +244,7 @@ class MemberRow(BaseModel):
     email: str
     phone: str
     identity_status: str
+    status: str
     tontine_count: int
 
 
@@ -248,9 +256,9 @@ async def list_members(user: dict[str, Any] = Depends(require_staff), gerance_id
         scope = {"gerance_id": user.get("gerance_id")}
     if scope:
         member_ids = await db.tontine_members.distinct("member_id", scope)
-        query: dict[str, Any] = {"id": {"$in": member_ids}}
+        query: dict[str, Any] = {"id": {"$in": member_ids}, "status": {"$ne": "trashed"}}
     else:
-        query = {"role": "member"}
+        query = {"role": "member", "status": {"$ne": "trashed"}}
     members = await db.users.find(query, {"_id": 0}).to_list(1000)
     out: list[MemberRow] = []
     for m in members:
@@ -262,6 +270,7 @@ async def list_members(user: dict[str, Any] = Depends(require_staff), gerance_id
                 email=m["email"],
                 phone=m["phone"],
                 identity_status=m.get("identity_status", "none"),
+                status=m.get("status", "active"),
                 tontine_count=await db.tontine_members.count_documents({"member_id": m["id"]}),
             )
         )

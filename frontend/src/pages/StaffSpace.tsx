@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { PublicLayout, Stat, StatusPill, Empty, BottomBar, scrollTabs } from "@/components/Shell";
 import SettingsPanel from "@/components/SettingsPanel";
-import { LayoutDashboard, Landmark, UserPlus, Wallet } from "lucide-react";
+import { LayoutDashboard, Landmark, Trash2, UserPlus, Wallet } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,6 +28,7 @@ import {
   type Manager,
   type MemberRow,
   type MemberFile,
+  type TrashMember,
   type PaymentProof,
   type MembershipRequest,
   type ArrearsExport,
@@ -1066,7 +1067,7 @@ function ImportMembersCard({ tontines }: { tontines: Tontine[] }) {
   );
 }
 
-function MembersPanel({ tontines }: { tontines: Tontine[] }) {
+function MembersPanel({ tontines, isAdmin }: { tontines: Tontine[]; isAdmin: boolean }) {
   const qc = useQueryClient();
   const [mode, setMode] = useState<"direct" | "invite">("direct");
   const [f, setF] = useState({ first_name: "", last_name: "", phone: "", email: "", password: "", tontine_id: "" });
@@ -1105,9 +1106,21 @@ function MembersPanel({ tontines }: { tontines: Tontine[] }) {
   });
 
   const disableMember = useMutation({
-    mutationFn: () => apiDelete<MemberFile>(`/members/${profileMemberId}`),
-    onSuccess: () => { toast.success("Compte membre désactivé, historique conservé"); qc.invalidateQueries(); setProfileMemberId(null); },
+    mutationFn: () => apiPatch<MemberFile>(`/members/${profileMemberId}/status`, { status: "disabled" }),
+    onSuccess: () => { toast.success("Compte membre désactivé, historique conservé"); qc.invalidateQueries(); },
     onError: (e) => toast.error(detail(e, "Désactivation impossible")),
+  });
+
+  const reactivateMember = useMutation({
+    mutationFn: () => apiPatch<MemberFile>(`/members/${profileMemberId}/status`, { status: "active" }),
+    onSuccess: () => { toast.success("Compte membre réactivé"); qc.invalidateQueries(); },
+    onError: (e) => toast.error(detail(e, "Réactivation impossible")),
+  });
+
+  const trashMember = useMutation({
+    mutationFn: () => apiPost(`/members/${profileMemberId}/trash`),
+    onSuccess: () => { toast.success("Membre placé dans la corbeille"); qc.invalidateQueries(); setProfileMemberId(null); },
+    onError: (e) => toast.error(detail(e, "Mise à la corbeille impossible")),
   });
 
   const updateBranches = useMutation({
@@ -1341,6 +1354,7 @@ function MembersPanel({ tontines }: { tontines: Tontine[] }) {
               <span className="font-medium">{m.first_name} {m.last_name}</span>
               <span className="text-muted-foreground">{m.email}</span>
               <span className="text-xs text-muted-foreground">{m.tontine_count} tontine(s)</span>
+              <StatusPill value={m.status} />
               <span className="text-xs">Identité : {label(m.identity_status)}</span>
               <div className="ml-auto flex items-center gap-2">
                   <Button size="xs" variant="outline" onClick={() => setProfileMemberId(m.id)} data-testid={`member-profile-${m.id}`}>
@@ -1389,18 +1403,25 @@ function MembersPanel({ tontines }: { tontines: Tontine[] }) {
                 ))}
                 <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
                   <Button size="sm" onClick={() => updateMember.mutate()} disabled={updateMember.isPending}>Enregistrer les informations</Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    disabled={disableMember.isPending || profile.data.status === "disabled"}
-                    onClick={() => {
-                      if (window.confirm("Désactiver ce compte membre ? Les cotisations, paiements, prises et historiques seront conservés. Le membre ne pourra plus se connecter.")) {
-                        disableMember.mutate();
-                      }
-                    }}
-                  >
-                    {profile.data.status === "disabled" ? "Compte désactivé" : "Désactiver le compte"}
-                  </Button>
+                  {profile.data.status === "disabled" ? (
+                    <Button size="sm" onClick={() => reactivateMember.mutate()} disabled={reactivateMember.isPending}>Réactiver</Button>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => disableMember.mutate()} disabled={disableMember.isPending}>Désactiver</Button>
+                  )}
+                  {isAdmin && (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      disabled={trashMember.isPending || profile.data.status === "trashed"}
+                      onClick={() => {
+                        if (window.confirm("Placer ce membre dans la corbeille ? Ses données seront conservées et il ne pourra plus se connecter.")) {
+                          trashMember.mutate();
+                        }
+                      }}
+                    >
+                      Mettre à la corbeille
+                    </Button>
+                  )}
                 </div>
               </div>
               {profile.data.tontines.map((line) => {
@@ -1482,6 +1503,51 @@ function MembersPanel({ tontines }: { tontines: Tontine[] }) {
   );
 }
 
+function TrashPanel({ members }: { members: TrashMember[] }) {
+  const qc = useQueryClient();
+  const restore = useMutation({
+    mutationFn: (id: string) => apiPost(`/members/${id}/restore`),
+    onSuccess: () => { toast.success("Membre restauré"); qc.invalidateQueries(); },
+    onError: (e) => toast.error(detail(e, "Restauration impossible")),
+  });
+  const permanentDelete = useMutation({
+    mutationFn: (id: string) => apiDelete(`/members/${id}/permanent`),
+    onSuccess: () => { toast.success("Membre supprimé définitivement"); qc.invalidateQueries(); },
+    onError: (e) => toast.error(detail(e, "Suppression définitive impossible")),
+  });
+
+  return (
+    <div className="space-y-3" data-testid="member-trash-list">
+      <p className="text-sm text-muted-foreground">Les membres de cette liste ne peuvent plus se connecter. Leurs branches, prises et historiques sont conservés jusqu’à une suppression définitive.</p>
+      {members.map((member) => (
+        <div key={member.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-card px-4 py-3 text-sm">
+          <div>
+            <p className="font-medium">{member.first_name} {member.last_name}</p>
+            <p className="text-xs text-muted-foreground">{member.email} · {member.tontine_count} tontine(s)</p>
+          </div>
+          <span className="text-xs text-muted-foreground">Mis à la corbeille {member.trashed_at ? new Date(member.trashed_at).toLocaleDateString("fr-FR") : ""}</span>
+          <div className="ml-auto flex gap-2">
+            <Button size="xs" onClick={() => restore.mutate(member.id)} disabled={restore.isPending}>Restaurer</Button>
+            <Button
+              size="xs"
+              variant="destructive"
+              onClick={() => {
+                if (window.confirm("Supprimer définitivement ce membre et toutes ses données ? Cette action est irréversible.")) {
+                  permanentDelete.mutate(member.id);
+                }
+              }}
+              disabled={permanentDelete.isPending}
+            >
+              Supprimer définitivement
+            </Button>
+          </div>
+        </div>
+      ))}
+      {members.length === 0 && <Empty text="La corbeille est vide." testId="member-trash-empty" />}
+    </div>
+  );
+}
+
 const DUE_FILTERS: [string, string][] = [
   ["all", "Tous"],
   ["paid", "À jour"],
@@ -1532,6 +1598,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
   const audits = useQuery({ queryKey: ["audit"], queryFn: () => apiGet<AuditRow[]>("/audit"), retry: false });
   const arrears = useQuery({ queryKey: ["arrears"], queryFn: () => apiGet<ArrearRow[]>("/arrears"), retry: false });
   const notifications = useQuery({ queryKey: ["notifications"], queryFn: () => apiGet<Notification[]>("/notifications"), retry: false });
+  const trashMembers = useQuery({ queryKey: ["members", "trash"], queryFn: () => apiGet<TrashMember[]>("/members/trash"), enabled: isAdmin, retry: false });
 
   const decideRequest = useMutation({
     mutationFn: (v: { id: string; action: string }) => apiPost(`/memberships/requests/${v.id}/decide`, { action: v.action }),
@@ -1590,6 +1657,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
             <TabsTrigger value="dashboard" data-testid="tab-dashboard">Tableau de bord</TabsTrigger>
             <TabsTrigger value="ma-gerance" data-testid="tab-ma-gerance">Ma gérance</TabsTrigger>
             <TabsTrigger value="membres" data-testid="tab-membres">Membres &amp; invitations</TabsTrigger>
+                        {isAdmin && <TabsTrigger value="corbeille" data-testid="tab-corbeille">Corbeille ({trashMembers.data?.length ?? 0})</TabsTrigger>}
             {isAdmin && <TabsTrigger value="supervision" data-testid="tab-supervision">Supervision des gérances</TabsTrigger>}
             {isAdmin && <TabsTrigger value="gerants" data-testid="tab-gerants">Gérants</TabsTrigger>}
             <TabsTrigger value="demandes" data-testid="tab-demandes">Demandes d'adhésion</TabsTrigger>
@@ -1632,8 +1700,14 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
           </TabsContent>
 
           <TabsContent value="membres" className="mt-6">
-            <MembersPanel tontines={myTontines.data ?? []} />
+            <MembersPanel tontines={myTontines.data ?? []} isAdmin={isAdmin} />
           </TabsContent>
+
+          {isAdmin && (
+            <TabsContent value="corbeille" className="mt-6">
+              <TrashPanel members={trashMembers.data ?? []} />
+            </TabsContent>
+          )}
 
           {isAdmin && (
             <TabsContent value="supervision" className="mt-6 grid gap-4 md:grid-cols-2" data-testid="supervision-list">
@@ -1940,6 +2014,7 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
           { value: "dashboard", text: "Accueil", icon: LayoutDashboard },
           { value: "ma-gerance", text: "Tontines", icon: Landmark },
           { value: "membres", text: "Membres", icon: UserPlus },
+                    ...(isAdmin ? [{ value: "corbeille", text: "Corbeille", icon: Trash2, badge: trashMembers.data?.length ?? 0 }] : []),
           { value: "paiements", text: "Paiements", icon: Wallet, badge: pendingPayments.length },
         ]}
       />

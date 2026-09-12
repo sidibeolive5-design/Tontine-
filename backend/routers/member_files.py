@@ -8,7 +8,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
 
-from lib.auth import ensure_permission, require_staff
+from lib.auth import ensure_permission, require_admin, require_staff
 from lib.core import audit, effective_status, notify, now_utc, penalty_amount
 from lib.dates import today_iso
 from lib.db import db
@@ -17,6 +17,7 @@ router = APIRouter()
 
 IDENTITY_STATUSES = ("none", "pending", "to_correct", "verified", "rejected")
 USER_STATUSES = ("active", "suspended", "disabled")
+TRASH_STATUS = "trashed"
 
 
 class MemberTontineLine(BaseModel):
@@ -97,6 +98,17 @@ async def _member_in_scope(member_id: str, user: dict[str, Any]) -> dict[str, An
         if not shared:
             raise HTTPException(status_code=403, detail="Ce membre n'appartient pas à votre gérance")
     return member
+
+
+class TrashMemberOut(BaseModel):
+    id: str
+    first_name: str
+    last_name: str
+    email: str
+    phone: str
+    status: str
+    trashed_at: Any = None
+    tontine_count: int = 0
 
 
 @router.get("/members/{member_id}/file", response_model=MemberFile)
@@ -241,6 +253,10 @@ class MemberUpdate(BaseModel):
     extra_info: Optional[str] = None
     status: Optional[str] = None
     identity_status: Optional[str] = None
+
+
+class MemberStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(active|disabled)$")
 
 
 class MemberTontineUpdate(BaseModel):
@@ -389,3 +405,75 @@ async def disable_member(member_id: str, user: dict[str, Any] = Depends(require_
                 member.get("gerance_id") or user.get("gerance_id"),
                 {"history_preserved": True})
     return await member_file(member_id, user)
+
+
+@router.patch("/members/{member_id}/status", response_model=MemberFile)
+async def update_member_status(member_id: str, payload: MemberStatusUpdate,
+                               user: dict[str, Any] = Depends(require_staff)):
+    ensure_permission(user, "manage_members")
+    member = await _member_in_scope(member_id, user)
+    if member.get("role") != "member":
+        raise HTTPException(status_code=403, detail="Seul un compte membre peut être réactivé ou désactivé")
+    await db.users.update_one(
+        {"id": member_id}, {"$set": {"status": payload.status, "updated_at": now_utc()}, "$unset": {"trashed_at": ""}}
+    )
+    await audit(user, "member_status_updated", "user", member_id,
+                member.get("gerance_id") or user.get("gerance_id"), {"status": payload.status})
+    return await member_file(member_id, user)
+
+
+@router.post("/members/{member_id}/trash", response_model=TrashMemberOut)
+async def move_member_to_trash(member_id: str, admin: dict[str, Any] = Depends(require_admin)):
+    member = await _member_in_scope(member_id, admin)
+    if member.get("role") != "member":
+        raise HTTPException(status_code=403, detail="Seul un compte membre peut être placé dans la corbeille")
+    trashed_at = now_utc()
+    await db.users.update_one(
+        {"id": member_id}, {"$set": {"status": TRASH_STATUS, "trashed_at": trashed_at, "updated_at": trashed_at}}
+    )
+    await audit(admin, "member_trashed", "user", member_id, admin.get("gerance_id"), {"history_preserved": True})
+    return TrashMemberOut(
+        id=member["id"], first_name=member["first_name"], last_name=member["last_name"],
+        email=member["email"], phone=member["phone"], status=TRASH_STATUS, trashed_at=trashed_at,
+        tontine_count=await db.tontine_members.count_documents({"member_id": member_id}),
+    )
+
+
+@router.get("/members/trash", response_model=list[TrashMemberOut])
+async def list_member_trash(_: dict[str, Any] = Depends(require_admin)):
+    rows = await db.users.find({"role": "member", "status": TRASH_STATUS}, {"_id": 0}).sort("trashed_at", -1).to_list(1000)
+    return [TrashMemberOut(
+        id=m["id"], first_name=m["first_name"], last_name=m["last_name"], email=m["email"],
+        phone=m["phone"], status=m.get("status", TRASH_STATUS), trashed_at=m.get("trashed_at"),
+        tontine_count=await db.tontine_members.count_documents({"member_id": m["id"]}),
+    ) for m in rows]
+
+
+@router.post("/members/{member_id}/restore", response_model=MemberFile)
+async def restore_member(member_id: str, admin: dict[str, Any] = Depends(require_admin)):
+    member = await db.users.find_one({"id": member_id, "role": "member", "status": TRASH_STATUS}, {"_id": 0})
+    if not member:
+        raise HTTPException(status_code=404, detail="Membre introuvable dans la corbeille")
+    await db.users.update_one({"id": member_id}, {"$set": {"status": "active", "updated_at": now_utc()}, "$unset": {"trashed_at": ""}})
+    await audit(admin, "member_restored", "user", member_id, admin.get("gerance_id"), {"history_preserved": True})
+    return await member_file(member_id, admin)
+
+
+@router.delete("/members/{member_id}/permanent", status_code=204)
+async def permanently_delete_member(member_id: str, admin: dict[str, Any] = Depends(require_admin)):
+    member = await db.users.find_one({"id": member_id, "role": "member", "status": TRASH_STATUS}, {"_id": 0})
+    if not member:
+        raise HTTPException(status_code=404, detail="Membre introuvable dans la corbeille")
+    queries = {"member_id": member_id}
+    await db.membership_requests.delete_many(queries)
+    await db.tontine_members.delete_many(queries)
+    await db.contribution_due_dates.delete_many(queries)
+    await db.payments.delete_many(queries)
+    await db.payouts.delete_many(queries)
+    await db.contracts.delete_many(queries)
+    await db.notifications.delete_many({"user_id": member_id})
+    await db.identity_verifications.delete_many({"user_id": member_id})
+    await db.invitations.delete_many({"$or": [{"user_id": member_id}, {"email": member["email"]}]})
+    await db.audit_logs.delete_many({"$or": [{"entity_id": member_id}, {"actor_id": member_id}]})
+    await db.users.delete_one({"id": member_id})
+    return None

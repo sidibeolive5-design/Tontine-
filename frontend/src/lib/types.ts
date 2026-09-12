@@ -274,6 +274,18 @@ export interface MemberRow {
   email: string;
   phone: string;
   identity_status: string;
+  status: string;
+  tontine_count: number;
+}
+
+export interface TrashMember {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  status: string;
+  trashed_at: string | null;
   tontine_count: number;
 }
 

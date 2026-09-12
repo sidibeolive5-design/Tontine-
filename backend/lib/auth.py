@@ -68,7 +68,7 @@ async def optional_user(request: Request) -> Optional[dict[str, Any]]:
     except jwt.PyJWTError:
         return None
     user = await db.users.find_one({"id": payload.get("sub")}, {"_id": 0})
-    if not user or user.get("status") in ("suspended", "disabled"):
+    if not user or user.get("status") in ("suspended", "disabled", "trashed"):
         return None
     return user
 
