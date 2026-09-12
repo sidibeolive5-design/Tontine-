@@ -26,10 +26,10 @@ export default function Home() {
       <section className="relative overflow-hidden">
         <div className="pointer-events-none absolute -left-24 -top-32 size-[26rem] rounded-full bg-primary/15 blur-3xl animate-glow" />
         <div className="pointer-events-none absolute right-[-8rem] top-24 size-[22rem] rounded-full bg-accent/60 blur-3xl" />
-        <div className="relative mx-auto grid w-full max-w-6xl gap-10 px-4 py-12 md:px-5 md:py-20 lg:grid-cols-[1.15fr_0.85fr] lg:py-28">
+        <div className="relative mx-auto grid w-full max-w-6xl gap-10 px-4 pb-12 pt-20 md:px-5 md:pb-20 md:pt-24 lg:grid-cols-[1.15fr_0.85fr] lg:pb-28 lg:pt-28">
           <div className="animate-rise">
             <span className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/8 px-3 py-1 text-xs uppercase tracking-[0.2em] text-primary">
-              Tontine encadrée • Côte d'Ivoire
+              VOS TONTINES, EN CONFIANCE
             </span>
             <h1 className="mt-6 font-heading text-[2.6rem] leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
               Cotiser ensemble,
@@ -48,21 +48,18 @@ export default function Home() {
               </Link>
             </div>
             <p className="mt-4 text-sm text-muted-foreground">La création du compte est gratuite.</p>
-            <div className="mt-8 grid gap-4 border-t border-border/70 pt-6 sm:grid-cols-2">
-              <div className="rounded-xl border border-border/60 bg-background/60 p-4">
-                <p className="font-heading text-lg">Espace membre</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Link to="/connexion" className={buttonVariants({ size: "sm" })}>Se connecter</Link>
-                  <Link to="/creer-mon-compte" className={buttonVariants({ size: "sm", variant: "outline" })}>Créer un compte</Link>
-                </div>
-              </div>
+            <div className="mt-8 grid gap-4 border-t border-border/70 pt-6">
               <div className="rounded-xl border border-primary/25 bg-primary/5 p-4">
                 <p className="font-heading text-lg">Vous êtes gérant ?</p>
+                <p className="mt-1 max-w-xl text-sm text-muted-foreground">Suivez les cotisations, validez les preuves de paiement et confirmez les prises, membre par membre.</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Link to="/connexion" className={buttonVariants({ size: "sm" })}>Se connecter</Link>
-                  <Link to="/devenir-gerant" className={buttonVariants({ size: "sm", variant: "outline" })}>Créer un compte gérant</Link>
+                  <Link to="/devenir-gerant" className="inline-flex min-h-11 items-center px-2 text-sm font-medium text-primary hover:underline">Créer un compte gérant →</Link>
                 </div>
               </div>
+            </div>
+            <div className="mt-5 flex flex-wrap gap-2" aria-label="Engagements de la plateforme">
+              {["Suivi au jour près", "Preuves vérifiées", "Positions confirmées"].map((item) => <span key={item} className="rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs font-medium text-primary">{item}</span>)}
             </div>
           </div>
 

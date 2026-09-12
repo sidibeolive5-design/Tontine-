@@ -140,6 +140,7 @@
   html {
     @apply font-sans;
     -webkit-text-size-adjust: 100%;
+    scroll-padding-top: 4.75rem;
     }
   .no-scrollbar {
     scrollbar-width: none;
@@ -147,6 +148,9 @@
   .no-scrollbar::-webkit-scrollbar {
     display: none;
     }
+  .tabular-nums {
+    font-variant-numeric: tabular-nums lining-nums;
+  }
 }
 
 @layer components {

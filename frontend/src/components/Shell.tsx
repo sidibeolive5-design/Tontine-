@@ -37,6 +37,7 @@ export function PublicLayout({ children, hasBottomBar = false }: { children: Rea
   const [menuOpen, setMenuOpen] = useState(false);
 
   const space = me?.role === "admin" ? "/administration" : me?.role === "manager" ? "/gerance" : "/espace-membre";
+  const roleText = me?.role === "admin" ? "ADMINISTRATEUR PRINCIPAL" : me?.role === "manager" ? "GÉRANT" : "MEMBRE";
 
   const logout = async () => {
     await endSession();
@@ -89,7 +90,7 @@ export function PublicLayout({ children, hasBottomBar = false }: { children: Rea
           <div className="ml-auto flex items-center gap-1.5 md:hidden">
             {!me && (
               <Link to="/creer-mon-compte" className={buttonVariants({ size: "sm" })} data-testid="header-register-link-mobile">
-                Créer
+                Créer un compte
               </Link>
             )}
             <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
@@ -109,31 +110,28 @@ export function PublicLayout({ children, hasBottomBar = false }: { children: Rea
                 </div>
                 <nav className="flex flex-col p-3 text-base">
                   {me && (
-                    <Link
-                      to={space}
-                      onClick={() => setMenuOpen(false)}
-                      className="rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground"
-                      data-testid="mobile-menu-space-link"
-                    >
-                      Mon espace
-                    </Link>
+                    <div className="mb-4 rounded-xl bg-primary/8 p-4">
+                      <div className="flex items-center gap-3">
+                        <span className="grid size-10 place-items-center rounded-full bg-primary font-heading text-lg text-primary-foreground">{me.first_name.charAt(0).toUpperCase()}</span>
+                        <div className="min-w-0"><p className="truncate font-medium">{me.first_name} {me.last_name}</p><p className="text-[0.68rem] font-semibold tracking-[0.12em] text-primary">{roleText}</p></div>
+                      </div>
+                      <Link to={space} onClick={() => setMenuOpen(false)} className="mt-3 flex min-h-11 items-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground" data-testid="mobile-menu-space-link">
+                        Mon tableau de bord
+                      </Link>
+                    </div>
                   )}
-                  {NAV.map((n) => (
-                    <Link
-                      key={n.to}
-                      to={n.to}
-                      onClick={() => setMenuOpen(false)}
-                      className="rounded-xl px-4 py-3 transition-colors duration-200 active:bg-accent"
-                      data-testid={`mobile-nav-${n.to.slice(1)}`}
-                    >
+                  <p className="px-4 pb-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{me ? "Informations" : "Plateforme"}</p>
+                  {NAV.filter((n) => !me || n.to !== "/tontines-disponibles").map((n) => (
+                    <Link key={n.to} to={n.to} onClick={() => setMenuOpen(false)} className="flex min-h-11 items-center rounded-xl px-4 py-3 transition-colors duration-200 active:bg-accent" data-testid={`mobile-nav-${n.to.slice(1)}`}>
                       {n.text}
                     </Link>
                   ))}
-                  <div className="my-2 h-px bg-border" />
+                  {me && <p className="mt-3 border-t border-border/70 px-4 pt-4 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Administration</p>}
+                  {me && <Link to={space} onClick={() => setMenuOpen(false)} className="flex min-h-11 items-center rounded-xl px-4 py-3 transition-colors hover:bg-accent">Mes tontines et membres</Link>}
                   {me ? (
                     <button
                       onClick={logout}
-                      className="rounded-xl px-4 py-3 text-left text-muted-foreground active:bg-accent"
+                      className="mt-3 min-h-11 border-t border-border/70 px-4 py-4 text-left text-red-700 active:bg-red-50"
                       data-testid="mobile-menu-logout-button"
                     >
                       Déconnexion
@@ -148,12 +146,11 @@ export function PublicLayout({ children, hasBottomBar = false }: { children: Rea
                       Se connecter
                     </Link>
                   )}
-                  <Link to="/conditions-utilisation" onClick={() => setMenuOpen(false)} className="rounded-xl px-4 py-3 text-sm text-muted-foreground">
-                    Conditions d'utilisation
-                  </Link>
-                  <Link to="/politique-confidentialite" onClick={() => setMenuOpen(false)} className="rounded-xl px-4 py-3 text-sm text-muted-foreground">
-                    Politique de confidentialité
-                  </Link>
+                  <div className="flex items-center gap-3 px-4 pt-3 text-xs text-muted-foreground">
+                    <Link to="/conditions-utilisation" onClick={() => setMenuOpen(false)} className="hover:text-primary">Conditions d'utilisation</Link>
+                    <Link to="/politique-confidentialite" onClick={() => setMenuOpen(false)} className="hover:text-primary">Confidentialité</Link>
+                    <span className="ml-auto">v1.0</span>
+                  </div>
                 </nav>
               </SheetContent>
             </Sheet>
@@ -313,9 +310,9 @@ export function StatusPill({ value, testId }: { value: string; testId?: string }
 
 export function Stat({ title, value, hint, testId }: { title: string; value: string; hint?: string; testId: string }) {
   return (
-    <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-[0_1px_0_oklch(1_0_0)] transition-shadow duration-300 hover:shadow-lg hover:shadow-primary/5">
-      <p className="text-xs uppercase tracking-wider text-muted-foreground">{title}</p>
-      <p className="mt-1 font-heading text-2xl" data-testid={testId}>
+    <div className="compact-surface min-h-11 p-3 transition-shadow duration-300 hover:shadow-md hover:shadow-primary/5">
+      <p className="text-[0.68rem] font-semibold uppercase tracking-wider text-foreground/65">{title}</p>
+      <p className="tabular-nums mt-1 font-heading text-2xl" data-testid={testId}>
         {value}
       </p>
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}

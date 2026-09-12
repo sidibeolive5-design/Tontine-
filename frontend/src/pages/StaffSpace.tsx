@@ -6,6 +6,7 @@ import { PublicLayout, Stat, StatusPill, Empty, BottomBar, scrollTabs } from "@/
 import SettingsPanel from "@/components/SettingsPanel";
 import { LayoutDashboard, Landmark, Trash2, UserPlus, Wallet } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -1651,26 +1652,39 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
   const pendingPayments = (payments.data ?? []).filter((p) => p.status === "pending");
   const todayIso = new Date().toISOString().slice(0, 10);
   const filteredDues = (dues.data ?? []).filter((d) => matchesDueFilter(d, dueFilter, todayIso));
+  const lateRows = arrears.data ?? [];
+  const lateMemberCount = new Set(lateRows.map((row) => row.member_id)).size;
+  const lateTontineCount = new Set(lateRows.map((row) => row.tontine_id)).size;
+  const pendingMemberships = (requests.data ?? []).filter((r) => r.status === "pending").length;
+  const pendingManagers = (managerRequests.data ?? []).filter((r) => r.status === "pending").length;
+  const expected = g?.total_expected ?? 0;
+  const collected = g?.total_paid ?? 0;
+  const collectedPercent = expected ? Math.min(100, Math.round((collected / expected) * 100)) : 0;
+  const remaining = Math.max(expected - collected, 0);
+  const unallocated = Math.max(expected - collected - (g?.total_pending ?? 0), 0);
+  const todaysDues = (dues.data ?? []).filter((d) => d.date === todayIso);
+  const todaysPaid = todaysDues.filter((d) => d.status === "paid").length;
 
   return (
     <PublicLayout hasBottomBar>
       <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-5 md:py-10">
-        <p className="text-xs uppercase tracking-[0.2em] text-primary">{isAdmin ? "Administration" : "Gérance"}</p>
-        <h1 className="font-heading text-3xl md:text-4xl" data-testid="staff-space-title">
-          {isAdmin ? "Administrateur principal" : g?.name ?? "Ma gérance"}
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">{isAdmin ? "Administration" : "Gérance"}</p>
+        <h1 className="mt-1 font-heading text-2xl md:text-3xl" data-testid="staff-space-title">
+          {isAdmin ? `Bonjour, ${me?.first_name ?? ""} · Administrateur principal` : g?.name ?? "Ma gérance"}
         </h1>
 
         <Tabs value={tab} onValueChange={setTab} className="mt-6 min-w-0 md:mt-8">
-          <TabsList variant="line" className={scrollTabs}>
-            <TabsTrigger value="dashboard" data-testid="tab-dashboard">Tableau de bord</TabsTrigger>
-            <TabsTrigger value="ma-gerance" data-testid="tab-ma-gerance">Ma gérance</TabsTrigger>
-            <TabsTrigger value="membres" data-testid="tab-membres">Membres &amp; invitations</TabsTrigger>
-                        {isAdmin && <TabsTrigger value="corbeille" data-testid="tab-corbeille">Corbeille ({trashMembers.data?.length ?? 0})</TabsTrigger>}
+          <div className="relative mt-4 after:pointer-events-none after:absolute after:right-0 after:top-0 after:h-full after:w-10 after:bg-gradient-to-l after:from-background to-transparent md:mt-6">
+          <TabsList variant="line" className={`${scrollTabs} pr-10`}>
+            <TabsTrigger value="dashboard" data-testid="tab-dashboard">Accueil</TabsTrigger>
+            <TabsTrigger value="ma-gerance" data-testid="tab-ma-gerance">Tontines</TabsTrigger>
+            <TabsTrigger value="membres" data-testid="tab-membres">Membres</TabsTrigger>
+            {isAdmin && <TabsTrigger value="corbeille" data-testid="tab-corbeille">Corbeille <Badge variant="secondary">{trashMembers.data?.length ?? 0}</Badge></TabsTrigger>}
             {isAdmin && <TabsTrigger value="supervision" data-testid="tab-supervision">Supervision des gérances</TabsTrigger>}
             {isAdmin && <TabsTrigger value="gerants" data-testid="tab-gerants">Gérants</TabsTrigger>}
-            {isAdmin && <TabsTrigger value="demandes-gerants" data-testid="tab-demandes-gerants">Demandes de gérants ({(managerRequests.data ?? []).filter((r) => r.status === "pending").length})</TabsTrigger>}
-            <TabsTrigger value="demandes" data-testid="tab-demandes">Demandes d'adhésion</TabsTrigger>
-            <TabsTrigger value="paiements" data-testid="tab-paiements">Paiements</TabsTrigger>
+            {isAdmin && <TabsTrigger value="demandes-gerants" data-testid="tab-demandes-gerants">Demandes <Badge variant="secondary">{pendingManagers}</Badge></TabsTrigger>}
+            <TabsTrigger value="demandes" data-testid="tab-demandes">Demandes <Badge variant="secondary">{pendingMemberships}</Badge></TabsTrigger>
+            <TabsTrigger value="paiements" data-testid="tab-paiements">Paiements <Badge variant="secondary">{pendingPayments.length}</Badge></TabsTrigger>
             <TabsTrigger value="cotisations" data-testid="tab-cotisations">Cotisations</TabsTrigger>
             <TabsTrigger value="retards" data-testid="tab-retards">Retards</TabsTrigger>
             <TabsTrigger value="prises" data-testid="tab-prises">Prises</TabsTrigger>
@@ -1678,8 +1692,10 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
             <TabsTrigger value="audit" data-testid="tab-audit">Historique &amp; audit</TabsTrigger>
             <TabsTrigger value="parametres" data-testid="tab-parametres">⚙️ Paramètres</TabsTrigger>
           </TabsList>
+          </div>
 
           <TabsContent value="dashboard" className="mt-5 space-y-5">
+            {lateMemberCount > 0 && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm"><span>⏰ {lateMemberCount} membre{lateMemberCount > 1 ? "s" : ""} en retard sur {lateTontineCount} tontine{lateTontineCount > 1 ? "s" : ""} — relances suggérées aujourd'hui</span><Button size="sm" onClick={() => setRemindTarget(lateRows[0])}>Relancer</Button></div>}
             <div className="flex items-end justify-between gap-4">
               <div>
                 <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Bonjour, {me?.first_name ?? ""}</p>
@@ -1690,36 +1706,25 @@ export default function StaffSpace({ mode }: { mode: "admin" | "manager" }) {
             <div className="dashboard-surface grid gap-4 p-5 md:grid-cols-[1.35fr_1fr] md:p-6">
               <div>
                 <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Total encaissé</p>
-                <p className="mt-2 font-heading text-4xl text-primary md:text-5xl" data-testid="stat-paid">{fcfa(g?.total_paid ?? 0)}</p>
+                <p className="tabular-nums mt-2 font-heading text-4xl text-primary md:text-5xl" data-testid="stat-paid">{fcfa(collected)}</p>
                 <p className="mt-2 text-sm text-muted-foreground">Sur l’ensemble de vos tontines</p>
+                <p className="tabular-nums mt-4 text-sm font-medium">{collectedPercent} % du total attendu</p>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-primary/10"><div className="h-full rounded-full bg-primary" style={{ width: `${collectedPercent}%` }} /></div>
+                <p className="mt-2 text-xs text-muted-foreground">Reste à encaisser : <span className="tabular-nums font-medium text-foreground">{fcfa(remaining)}</span> · Pénalités : <span className="tabular-nums font-medium text-foreground">{fcfa(g?.total_penalties ?? 0)}</span></p>
+                {unallocated > 0 && <p className="mt-1 text-xs text-muted-foreground">Écart à répartir : <span className="tabular-nums font-medium text-foreground">{fcfa(unallocated)}</span></p>}
               </div>
               <div className="grid grid-cols-2 gap-2 self-end">
                 <Stat title="Membres" value={String(g?.member_count ?? 0)} testId="stat-members" />
                 <Stat title="Tontines" value={String(g?.tontine_count ?? 0)} testId="stat-tontines" />
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Stat title="Total attendu" value={fcfa(g?.total_expected ?? 0)} testId="stat-expected" />
+            <div className="grid grid-cols-2 gap-3">
               <Stat title="En attente" value={fcfa(g?.total_pending ?? 0)} testId="stat-pending" />
+              <Stat title="Membres en retard" value={String(lateMemberCount)} hint={`sur ${g?.member_count ?? 0} membres`} testId="stat-late" />
+              <Stat title="Demandes en attente" value={String(pendingMemberships + pendingManagers)} testId="stat-pending-requests" />
               <Stat title="Pénalités" value={fcfa(g?.total_penalties ?? 0)} testId="stat-penalties" />
             </div>
-            <section className="dashboard-surface p-4 md:p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div><p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">À vérifier</p><h3 className="mt-1 font-heading text-xl">Les actions qui attendent votre attention</h3></div>
-                <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">{pendingPayments.length + (requests.data ?? []).filter((r) => r.status === "pending").length + (arrears.data ?? []).length}</span>
-              </div>
-              <div className="mt-4 divide-y divide-border/60">
-                {[
-                  { label: "Paiements à vérifier", count: pendingPayments.length, tab: "paiements" },
-                  { label: "Demandes d’adhésion", count: (requests.data ?? []).filter((r) => r.status === "pending").length, tab: "demandes" },
-                  { label: "Membres en retard", count: (arrears.data ?? []).length, tab: "retards" },
-                ].map((item) => (
-                  <button key={item.tab} onClick={() => setTab(item.tab)} className="flex w-full items-center justify-between gap-3 py-3 text-left text-sm transition-colors hover:text-primary">
-                    <span>{item.label}</span><span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold">{item.count}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
+            <section className="rounded-xl border border-primary/20 bg-primary/5 p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Aujourd'hui</p><p className="mt-1 font-medium">Cotisations du jour : {todaysPaid}/{todaysDues.length} reçues</p></div><button className="min-h-11 text-sm font-medium text-primary hover:underline" onClick={() => setTab("cotisations")}>Voir les manquants →</button></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-primary/10"><div className="h-full rounded-full bg-primary" style={{ width: todaysDues.length ? `${Math.round((todaysPaid / todaysDues.length) * 100)}%` : "0%" }} /></div></section>
           </TabsContent>
 
           <TabsContent value="ma-gerance" className="mt-6 space-y-6">
