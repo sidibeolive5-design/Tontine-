@@ -465,6 +465,10 @@ async def permanently_delete_member(member_id: str, admin: dict[str, Any] = Depe
     if not member:
         raise HTTPException(status_code=404, detail="Membre introuvable dans la corbeille")
     queries = {"member_id": member_id}
+    await db.positions.update_many(
+        {"member_id": member_id},
+        {"$set": {"member_id": None, "status": "open"}, "$unset": {"branch_number": ""}},
+    )
     await db.membership_requests.delete_many(queries)
     await db.tontine_members.delete_many(queries)
     await db.contribution_due_dates.delete_many(queries)
@@ -474,6 +478,8 @@ async def permanently_delete_member(member_id: str, admin: dict[str, Any] = Depe
     await db.notifications.delete_many({"user_id": member_id})
     await db.identity_verifications.delete_many({"user_id": member_id})
     await db.invitations.delete_many({"$or": [{"user_id": member_id}, {"email": member["email"]}]})
-    await db.audit_logs.delete_many({"$or": [{"entity_id": member_id}, {"actor_id": member_id}]})
+    await db.audit_logs.delete_many({"$or": [
+        {"entity_id": member_id}, {"actor_id": member_id}, {"details.member_id": member_id},
+    ]})
     await db.users.delete_one({"id": member_id})
     return None
